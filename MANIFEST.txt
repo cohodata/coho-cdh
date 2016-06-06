@@ -1,0 +1,6 @@
+The list of components installed as part of building this docker image
+includes, but is not limited to, the following:
+
+* Ubuntu (http://ubuntu.com)
+* Cloudera Hadoop Distribution (http://cloudera.com)
+* Consul (http://consul.io)

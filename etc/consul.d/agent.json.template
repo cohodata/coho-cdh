@@ -1,0 +1,9 @@
+{
+  "node_name": "CONSUL_NODE_NAME",
+  "data_dir": "/var/consul/data",
+  "client_addr": "0.0.0.0",
+  "log_level": "debug",
+  "ports": {
+    "dns": 53
+  }
+}
