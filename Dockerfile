@@ -42,6 +42,7 @@ RUN apt-get install -y ant \
                        emacs \
                        rsync \
                        iputils-ping \
+                       jq \
                        net-tools \
                        openssh-server \
                        python \
