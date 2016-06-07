@@ -91,4 +91,8 @@ ENV COHO_TENANT namespace1
 ENV COHO_HADOOP_CLUSTER dc
 ENV WITH_COHO_HADOOP_TOPOLOGY true
 
+# This image will be used to set up a Yarn cluster
+RUN rm -rf /etc/hadoop/conf && \
+    mv /etc/hadoop/conf.docker.yarn /etc/hadoop/conf
+
 ENTRYPOINT ["/usr/bin/do-with-consul"]
