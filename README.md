@@ -6,9 +6,9 @@ a simple Big Data Compute Cluster to run on Coho Datastream.
 In order to use these docker images you can either pull it down
 from the docker hub:
 
-    docker pull shayan/coho-cdh
+    docker pull cohodata/yarn
   
 or clone this repository and build the image locally:
 
-    docker build -t coho-cdh
+    docker build -t yarn
   
