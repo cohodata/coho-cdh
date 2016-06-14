@@ -101,4 +101,7 @@ ENV WITH_COHO_HADOOP_TOPOLOGY true
 RUN rm -rf /etc/hadoop/conf && \
     mv /etc/hadoop/conf.docker.yarn /etc/hadoop/conf
 
+# Driver
+ADD usr/bin/driver.py /usr/bin/driver.py
+
 ENTRYPOINT ["/usr/bin/do-with-consul"]
