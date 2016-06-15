@@ -10,5 +10,5 @@ from the docker hub:
   
 or clone this repository and build the image locally:
 
-    docker build -t yarn
+    docker build -t yarn .
   
