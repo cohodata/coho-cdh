@@ -27,17 +27,25 @@ import urllib2
 import socket
 import json
 import os.path
+import base64
 from urlparse import urlparse
 from urllib import urlencode
 from collections import OrderedDict
 from functools import partial
 
+# pacify newer ssl libraries
+import ssl
+setattr(ssl, '_create_default_https_context',
+        getattr(ssl, '_create_unverified_context', None))
+
+DEFAULT_USER = 'admin'
 DEFAULT_VLANID = 2100
 DEFAULT_VLANSUBNET = '172.20.31.0/24'
 RESOURCEMANAGER = 'resourcemanager'
 NODEMANAGER = 'nodemanager'
 HISTORYSERVER = 'historyserver'
 YARN_IMAGE = 'yarn'
+DEPLOY_TIMEOUT = 1200.0
 
 CONFIG = {}
 
@@ -69,18 +77,19 @@ def doHTTP(url, method, params=None, data=None, timeout=0.0):
     if params:
         url += "?" + urlencode(params)
     url_info = urlparse(url)
-    auth_handler = urllib2.HTTPBasicAuthHandler()
-    auth_handler.add_password(realm='Coho data',
-                              uri='%s://%s' % (url_info.scheme, url_info.netloc),
-                              user='admin',
-                              passwd=get_cfg('password'))
-    opener = urllib2.build_opener(HTTPFollowRedirectHandler, auth_handler)
+    user = get_cfg('user')
+    password = get_cfg('password')
+    if password is not None:
+        b64 = base64.encodestring('%s:%s' % (user, password))[:-1]
+    opener = urllib2.build_opener(HTTPFollowRedirectHandler)
     if data:
         post_data = json.dumps(data)
         request = urllib2.Request(url, data=post_data)
     else:
         request = urllib2.Request(url)
     request.add_header('Content-Type', 'application/json')
+    if password is not None:
+        request.add_header('Authorization', 'Basic %s' % b64)
     request.get_method = lambda: method
     try:
         if timeout > 0.0:
@@ -92,7 +101,12 @@ def doHTTP(url, method, params=None, data=None, timeout=0.0):
         return rep.read()
 
     except urllib2.HTTPError as err:
-        raise HTTPError(err)
+        if err.code == 401:
+            print('Connection error: 401 Unauthorized.  '
+                  'Please ensure that the password is correct.')
+            return None
+        else:
+            raise HTTPError(err)
     except socket.timeout as e:
         raise HTTPError(None, code=598, content=repr(e), url=url)
     except urllib2.URLError as e:
@@ -108,6 +122,8 @@ def doJsonGetAll(url, params=None, timeout=0.0):
 
     params = params or {}
     res = doJson(url, 'GET', params=params, timeout=timeout)
+    if res is None:
+        return data
     count = res['meta']['count']
 
     page_size = 50 # the page size is always 50.
@@ -180,7 +196,7 @@ def is_pod_running(url, tenant, pod_name, filters, phase='Running',
                    waitforIP=True):
     """ Verifies a pod is in the RUNNING state """
     isup = partial(waitforpods, tenant, url, filters, phase, waitforIP)
-    pod_running = retry_func(isup , limit = 30, interval = 10)
+    pod_running = retry_func(isup, limit=DEPLOY_TIMEOUT/10, interval=10)
     if not pod_running:
         print("Unable to start %s for %s ..." % ( pod_name, tenant) )
         print("Exiting...")
@@ -264,6 +280,9 @@ def get_cfg(key):
         if CONFIG[key] is None:
             print('The specified tenant (%s) does not exist' % str(tenant))
             sys.exit(1)
+
+    elif key == 'yarn_image':
+        CONFIG[key] = YARN_IMAGE
 
     elif key == 'vlanid':
         CONFIG[key] = DEFAULT_VLANID
@@ -430,7 +449,7 @@ def genresourcemanagerrcspec(registryip, consulip, networkname):
                })
 
     registry = '%s:5000' % registryip
-    image = os.path.join(registry, YARN_IMAGE)
+    image = os.path.join(registry, get_cfg('yarn_image'))
 
     return genrcspec(networkname,
               name=RESOURCEMANAGER,
@@ -447,7 +466,7 @@ def gennodemanagerrcspec(registryip, consulip, networkname, replicas):
                })
 
     registry = '%s:5000' % registryip
-    image = os.path.join(registry, YARN_IMAGE)
+    image = os.path.join(registry, get_cfg('yarn_image'))
 
     return genrcspec(networkname,
               name=NODEMANAGER,
@@ -464,7 +483,7 @@ def genhistoryserverrcspec(registryip, consulip, networkname):
                })
 
     registry = '%s:5000' % registryip
-    image = os.path.join(registry, YARN_IMAGE)
+    image = os.path.join(registry, get_cfg('yarn_image'))
 
     return genrcspec(networkname,
               name=HISTORYSERVER,
@@ -483,7 +502,7 @@ def deployrcs(url, namespaces, replicationcontrollers, label, retrylimit=30):
     if get_cfg('verbose') is True:
         print('Data:\n%s' % json.dumps(replicationcontrollers, indent=4))
     for rc in replicationcontrollers:
-        resp = doJson(rcurl, 'POST', data=rc)
+        resp = doJson(rcurl, 'POST', data=rc, timeout=DEPLOY_TIMEOUT)
 
     # Wait for pod to be "Running"
     for rc in replicationcontrollers:
@@ -568,12 +587,12 @@ def mk_images():
           ' tenant network.')
 
     registry_url = '%s' % (get_cfg('registry_url'))
-    src = os.path.join(registry_url, YARN_IMAGE)
+    src = os.path.join(registry_url, get_cfg('yarn_image'))
     src += tag
     print('docker pull %s' % src)
 
     registry = '%s:5000' % registryip
-    dest = os.path.join(registry, YARN_IMAGE)
+    dest = os.path.join(registry, get_cfg('yarn_image'))
     dest += tag
     print('docker tag %s %s' % (src, dest))
 
@@ -710,6 +729,9 @@ def argparser():
     from argparse import ArgumentParser, SUPPRESS
     p = ArgumentParser(description='COHO CDH Hadoop compute cluster '
                                     'management script.')
+    p.add_argument('-i', '--yarn_image', type=str, help=SUPPRESS)
+    p.add_argument('-p', '--password', type=str,
+                   help='Management UI admin password')
     p.add_argument('-d', '--debug', action='store_true', help=SUPPRESS)
     p.add_argument('-v', '--verbose', action='store_true', help=SUPPRESS)
     p.add_argument('api_address', type=str,
@@ -754,6 +776,9 @@ if __name__ == '__main__':
     CONFIG['tag']           = _args.get('tag', '')
     CONFIG['debug']         = _args.get('debug', False)
     CONFIG['verbose']       = _args.get('verbose', False)
+    CONFIG['user']          = DEFAULT_USER
+    CONFIG['password']      = _args.get('password', None)
+    CONFIG['yarn_image']    = _args.get('yarn_image', None)
     command = _args.get('command', '')
 
     steps = []
