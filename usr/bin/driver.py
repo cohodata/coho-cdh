@@ -44,8 +44,11 @@ DEFAULT_VLANSUBNET = '172.20.31.0/24'
 RESOURCEMANAGER = 'resourcemanager'
 NODEMANAGER = 'nodemanager'
 HISTORYSERVER = 'historyserver'
+#YARN_IMAGE = 'andre/yarn-test'
 YARN_IMAGE = 'yarn'
-DEPLOY_TIMEOUT = 1200.0
+WAIT_POD_INTERVAL = 5
+DEPLOY_CONSUL_RETRY = 120
+DEPLOY_POD_RETRY = 1200
 
 CONFIG = {}
 
@@ -104,14 +107,20 @@ def doHTTP(url, method, params=None, data=None, timeout=0.0):
         if err.code == 401:
             print('Connection error: 401 Unauthorized.  '
                   'Please ensure that the password is correct.')
-            return None
+            sys.exit(1)
+        elif err.code == 403:
+            print('Connection error: 403 Forbidden.  '
+                  'Please ensure that microservices are enabled.')
+            sys.exit(1)
         else:
             raise HTTPError(err)
     except socket.timeout as e:
-        raise HTTPError(None, code=598, content=repr(e), url=url)
+        print('Connection error: timeout.')
+        sys.exit(1)
     except urllib2.URLError as e:
         # Connection timeouts can trigger ENETUNREACH
-        raise HTTPError(None, code=599, content=str(e.reason), url=url)
+        print('Connection error: Host unreachable.')
+        sys.exit(1)
 
 def doJson(url, method, params=None, data=None, timeout=0.0):
     x = doHTTP(url, method, params=params, data=data, timeout=timeout)
@@ -193,12 +202,13 @@ def retry_func(fn, limit = 10, interval = 1.0 ):
     return ret
 
 def is_pod_running(url, tenant, pod_name, filters, phase='Running',
-                   waitforIP=True):
+                   waitforIP=True, retrylimit=30):
     """ Verifies a pod is in the RUNNING state """
     isup = partial(waitforpods, tenant, url, filters, phase, waitforIP)
-    pod_running = retry_func(isup, limit=DEPLOY_TIMEOUT/10, interval=10)
+    pod_running = retry_func(isup, limit=retrylimit, interval=WAIT_POD_INTERVAL)
     if not pod_running:
-        print("Unable to start %s for %s ..." % ( pod_name, tenant) )
+        print("Unable to start %s (%s); timeout after %ss." %
+              (pod_name, tenant, str(retrylimit*WAIT_POD_INTERVAL)) )
         print("Exiting...")
         sys.exit(1)
     # Invalidate known state of pods
@@ -219,7 +229,7 @@ def get_info(data, attrs):
 def get_pods(url, tenant):
     """ Retrieve all pods """
     try:
-        resp = doJson('{url}/ns/{ns}/pods'.format(url=url, ns=tenant) , 'GET')
+        resp = doJsonGetAll('{url}/ns/{ns}/pods'.format(url=url, ns=tenant))
     except Exception as exc:
         resp = None
     return resp
@@ -326,8 +336,7 @@ def get_cfg(key):
     elif key == 'pods':
         url = get_cfg('api_address')
         tenant = get_cfg('tenant_name')
-        pods = get_pods(url, tenant)
-        CONFIG[key] = pods.get('data', None)
+        CONFIG[key] = get_pods(url, tenant)
 
     else:
         return None
@@ -381,11 +390,11 @@ def dm_genrcspec(name, namespace, replicas, labels, **kwargs):
 # From cio/tests/microserviceshdfs.py
 def getconsulenv(consulip):
     return [
-        {   
+        {
             "name": "CONSUL_IP",
             "value": "%s" % consulip,
         },
-        {   
+        {
             "name": "CONSUL_RETRY_INTERVAL",
             "value": "5",
         }
@@ -502,12 +511,26 @@ def deployrcs(url, namespaces, replicationcontrollers, label, retrylimit=30):
     if get_cfg('verbose') is True:
         print('Data:\n%s' % json.dumps(replicationcontrollers, indent=4))
     for rc in replicationcontrollers:
-        resp = doJson(rcurl, 'POST', data=rc, timeout=DEPLOY_TIMEOUT)
+        try:
+            resp = doJson(rcurl, 'POST', data=rc)
+        except HTTPError as e:
+            labels = get_info(rc, ['spec', 'podTemplate', 'labels'])
+            poddesc = '%s with labels %s' % (rc['name'], str(labels))
+            if e.code == 409:
+                print('Pod %s already exists.' % poddesc)
+            else:
+                print('Error deploying pod %s.' % poddesc)
+                sys.exit(1)
+        except Exception as e:
+            labels = get_info(rc, ['spec', 'podTemplate', 'labels'])
+            poddesc = '%s with labels %s' % (rc['name'], str(labels))
+            print('Error deploying pod %s.' % poddesc)
+            sys.exit(1)
 
     # Wait for pod to be "Running"
     for rc in replicationcontrollers:
         is_pod_running(url, namespaces[0], rc['name'], 'labels.name:'+label,
-                       "Running", False)
+                       "Running", False, retrylimit)
 
 #------------------------------------------------------------------------------
 def rm_pod(label):
@@ -546,10 +569,19 @@ def rm_pod(label):
 # These are used for debugging only.
 def mk_tenant():
     url = get_cfg('api_address')
+
+    tenant = get_tenant_name(url)
+    if tenant is not None:
+        print('Tenant %s already exists.' % tenant)
+        return
+
     vlanid = get_cfg('vlanid')
     vlan_subnet = get_cfg('vlan_subnet')
     print('Creating tenant: VLAN-SUBNET=%s' % (vlan_subnet))
     ns = {
+            'namespace': {
+                'ns': 'namespace1',
+            },
             'network': {
                 'mode': 'VLAN',
                 'vlan': {
@@ -612,7 +644,8 @@ def mk_consul():
     for rc in genconsulrcspec(networkname=network):
         replicationcontrollers.append(dm_genrcspec(**rc))
 
-    deployrcs(url, namespaces, replicationcontrollers, 'consul')
+    deployrcs(url, namespaces, replicationcontrollers, 'consul',
+              retrylimit=DEPLOY_CONSUL_RETRY)
 
 def rm_consul():
     rm_pod('consul')
@@ -636,7 +669,8 @@ def mk_rm():
     for rc in genresourcemanagerrcspec(registryip=registryip, consulip=consulip, networkname=network):
         replicationcontrollers.append(dm_genrcspec(**rc))
 
-    deployrcs(url, namespaces, replicationcontrollers, RESOURCEMANAGER, retrylimit=300)
+    deployrcs(url, namespaces, replicationcontrollers, RESOURCEMANAGER,
+              retrylimit=DEPLOY_POD_RETRY)
 
 def rm_rm():
     rm_pod(RESOURCEMANAGER)
@@ -661,7 +695,8 @@ def mk_nm():
 
     for rc in gennodemanagerrcspec(registryip=registryip, consulip=consulip, networkname=network, replicas=replicas):
         replicationcontrollers.append(dm_genrcspec(**rc))
-    deployrcs(url, namespaces, replicationcontrollers, NODEMANAGER, retrylimit=300)
+    deployrcs(url, namespaces, replicationcontrollers, NODEMANAGER,
+              retrylimit=DEPLOY_POD_RETRY)
 
 def rm_nm():
     rm_pod(NODEMANAGER)
@@ -684,7 +719,8 @@ def mk_hs():
 
     for rc in genhistoryserverrcspec(registryip=registryip, consulip=consulip, networkname=network):
         replicationcontrollers.append(dm_genrcspec(**rc))
-    deployrcs(url, namespaces, replicationcontrollers, HISTORYSERVER, retrylimit=300)
+    deployrcs(url, namespaces, replicationcontrollers, HISTORYSERVER,
+              retrylimit=DEPLOY_POD_RETRY)
 
 def rm_hs():
     rm_pod(HISTORYSERVER)
@@ -814,4 +850,13 @@ if __name__ == '__main__':
         ACTIONS[step]()
         if CONFIG['verbose'] is True:
             print('<<< Completed %s' % step)
+
+    if command == 'create':
+        print('Success: compute cluster created.')
+
+    elif command == 'delete':
+        print('Success: compute cluster deleted.')
+
+    else:
+        print('Success: %s' % str(steps))
 
