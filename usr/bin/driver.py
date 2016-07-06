@@ -280,7 +280,8 @@ def get_cfg(key):
         url = get_cfg('api_address')
         CONFIG[key] = get_tenant_name(url)
         if CONFIG[key] is None:
-            print('No tenant found')
+            print('No tenant found.  ' +
+                  'Please ensure that microservices are enabled.')
             sys.exit(1)
 
     elif key == 'tenant':
@@ -533,11 +534,13 @@ def deployrcs(url, namespaces, replicationcontrollers, label, retrylimit=30):
                        "Running", False, retrylimit)
 
 #------------------------------------------------------------------------------
-def rm_pod(label):
+def rm_pod(label, context, step):
     baseurl = get_cfg('api_address')
     tenant = get_cfg('tenant_name')
     if tenant is None:
-        print('No tenant found!')
+        error = 'No tenant found!'
+        print(error)
+        context[step + '-error'] = error
         return
 
     url = os.path.join(baseurl, 'ns', tenant, 'replicationcontrollers', label)
@@ -545,7 +548,16 @@ def rm_pod(label):
         if get_cfg('debug') is True:
             print('DELETE %s' % (url))
         resp = doJson(url, 'DELETE')
+    except HTTPError as e:
+        if e.code == 404:
+            error = ('%s not found' % label)
+        else:
+            error = ('Unable to delete %s (%s)' % (label, str(e)))
+        context[step + '-error'] = error
+        pass
     except Exception as e:
+        error = ('Unable to delete %s (%s)' % (label, str(e)))
+        context[step + '-error'] = error
         pass
 
 
@@ -567,7 +579,7 @@ def rm_pod(label):
 
 #------------------------------------------------------------------------------
 # These are used for debugging only.
-def mk_tenant():
+def mk_tenant(context):
     url = get_cfg('api_address')
 
     tenant = get_tenant_name(url)
@@ -590,15 +602,15 @@ def mk_tenant():
                 }
             }
          }
-    x = doJson('%s/tenant' % url, 'POST', data=ns)
+    doJson('%s/tenant' % url, 'POST', data=ns)
 
-def rm_tenant():
+def rm_tenant(context):
     url = get_cfg('api_address')
     tenant = get_cfg('tenant_name')
 
     print('Removing the tenant %s' % tenant)
     try:
-        doJson('%s/tenant/%s' % (url, tenant), 'DELETE')
+        x = doJson('%s/tenant/%s' % (url, tenant), 'DELETE')
         print('Finished removing tenant')
     except HTTPError as e:
         if e.code == 404:
@@ -609,7 +621,7 @@ def rm_tenant():
     CONFIG['tenant_name'] = None
     CONFIG['tenant'] = None
 
-def mk_images():
+def mk_images(context):
     registryip = get_cfg('registryip')
     tag = get_cfg('tag')
     if tag is not '':
@@ -630,11 +642,11 @@ def mk_images():
 
     print('docker push %s' % dest)
 
-def rm_images():
+def rm_images(context):
     pass
 
 #------------------------------------------------------------------------------
-def mk_consul():
+def mk_consul(context):
     url = get_cfg('api_address')
     tenant = get_cfg('tenant_name')
     namespaces = [tenant]
@@ -647,10 +659,10 @@ def mk_consul():
     deployrcs(url, namespaces, replicationcontrollers, 'consul',
               retrylimit=DEPLOY_CONSUL_RETRY)
 
-def rm_consul():
-    rm_pod('consul')
+def rm_consul(context):
+    rm_pod('consul', context, 'rm-consul')
 
-def mk_rm():
+def mk_rm(context):
     print('Deploying resource manager.')
 
     url = get_cfg('api_address')
@@ -672,10 +684,10 @@ def mk_rm():
     deployrcs(url, namespaces, replicationcontrollers, RESOURCEMANAGER,
               retrylimit=DEPLOY_POD_RETRY)
 
-def rm_rm():
-    rm_pod(RESOURCEMANAGER)
+def rm_rm(context):
+    rm_pod(RESOURCEMANAGER, context, 'rm-rm')
 
-def mk_nm():
+def mk_nm(context):
     print('Deploying node manager.')
 
     url = get_cfg('api_address')
@@ -698,10 +710,10 @@ def mk_nm():
     deployrcs(url, namespaces, replicationcontrollers, NODEMANAGER,
               retrylimit=DEPLOY_POD_RETRY)
 
-def rm_nm():
-    rm_pod(NODEMANAGER)
+def rm_nm(context):
+    rm_pod(NODEMANAGER, context, 'rm-nm')
 
-def mk_hs():
+def mk_hs(context):
     print('Deploying history server.')
 
     url = get_cfg('api_address')
@@ -722,10 +734,10 @@ def mk_hs():
     deployrcs(url, namespaces, replicationcontrollers, HISTORYSERVER,
               retrylimit=DEPLOY_POD_RETRY)
 
-def rm_hs():
-    rm_pod(HISTORYSERVER)
+def rm_hs(context):
+    rm_pod(HISTORYSERVER, context, 'rm-hs')
 
-def get_rm():
+def get_rm(context):
     label_attrs = ['labels', 'name']
     name_attrs = ['name']
     pods = get_cfg('pods')
@@ -840,6 +852,7 @@ if __name__ == '__main__':
     ACTIONS.update(MK_ACTIONS)
     ACTIONS.update(RM_ACTIONS)
 
+    context = {}
     for step in steps:
         if CONFIG['verbose'] is True:
             print('----------------------------------------------------------')
@@ -847,7 +860,7 @@ if __name__ == '__main__':
         if not ACTIONS.has_key(step):
             print('Invalid step: %s!' % step)
             sys.exit(1)
-        ACTIONS[step]()
+        ACTIONS[step](context)
         if CONFIG['verbose'] is True:
             print('<<< Completed %s' % step)
 
@@ -855,8 +868,17 @@ if __name__ == '__main__':
         print('Success: compute cluster created.')
 
     elif command == 'delete':
-        print('Success: compute cluster deleted.')
+        errors = ''
+        for step in steps:
+            error = context.get(step + '-error', None)
+            if error is not None:
+                errors += '\n  ' + error
+        if errors is not '':
+            print('Errors encountered:' + errors)
+            print('Success: all compute cluster containers removed.')
+        else:
+            print('Success: compute cluster deleted.')
 
-    else:
+    elif command == 'manual':
         print('Success: %s' % str(steps))
 
