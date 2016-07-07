@@ -105,12 +105,17 @@ def doHTTP(url, method, params=None, data=None, timeout=0.0):
 
     except urllib2.HTTPError as err:
         if err.code == 401:
-            print('Connection error: 401 Unauthorized.  '
+            print('Connection error: 401 Unauthorized.\n'
                   'Please ensure that the password is correct.')
             sys.exit(1)
         elif err.code == 403:
-            print('Connection error: 403 Forbidden.  '
+            print('Connection error: 403 Forbidden.\n'
                   'Please ensure that microservices are enabled.')
+            sys.exit(1)
+        elif err.code == 404:
+            print('Connection error: 404 Not Found.\n'
+                  'Please ensure that the Coho Data Management API address'
+                  ' is correct.')
             sys.exit(1)
         else:
             raise HTTPError(err)
