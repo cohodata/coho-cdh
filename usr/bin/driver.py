@@ -112,11 +112,6 @@ def doHTTP(url, method, params=None, data=None, timeout=0.0):
             print('Connection error: 403 Forbidden.\n'
                   'Please ensure that microservices are enabled.')
             sys.exit(1)
-        elif err.code == 404:
-            print('Connection error: 404 Not Found.\n'
-                  'Please ensure that the Coho Data Management API address'
-                  ' is correct.')
-            sys.exit(1)
         else:
             raise HTTPError(err)
     except socket.timeout as e:
@@ -240,7 +235,15 @@ def get_pods(url, tenant):
     return resp
 
 def get_tenant_name(url):
-    tenants = doJsonGetAll('{url}/tenant'.format(url=url))
+    try:
+        tenants = doJsonGetAll('{url}/tenant'.format(url=url))
+    except HTTPError as err:
+        if err.code == 404:
+            print('Connection error: 404 Not Found.\n'
+                  'Please ensure that the Coho Data Management API address'
+                  ' is correct.')
+            sys.exit(1)
+
     if len(tenants) > 0:
         return get_info(tenants[0], ['namespace', 'ns'])
 
