@@ -237,15 +237,15 @@ def get_pods(url, tenant):
 def get_tenant_name(url):
     try:
         tenants = doJsonGetAll('{url}/tenant'.format(url=url))
+        if len(tenants) > 0:
+            return get_info(tenants[0], ['namespace', 'ns'])
+
     except HTTPError as err:
         if err.code == 404:
             print('Connection error: 404 Not Found.\n'
                   'Please ensure that the Coho Data Management API address'
                   ' is correct.')
             sys.exit(1)
-
-    if len(tenants) > 0:
-        return get_info(tenants[0], ['namespace', 'ns'])
 
     # This should only occur in ciotest
     nss = doJsonGetAll('{url}/ns'.format(url=url))
@@ -516,6 +516,7 @@ def deployrcs(url, namespaces, replicationcontrollers, label, retrylimit=30):
     # update the dockman spec so that the replication controllers referenence
     # images stored in the per-tenant registry.
 
+    error = None
     rcurl = os.path.join(url, 'ns', namespaces[0], 'replicationcontrollers')
     if get_cfg('verbose') is True:
         print('Data:\n%s' % json.dumps(replicationcontrollers, indent=4))
@@ -526,7 +527,10 @@ def deployrcs(url, namespaces, replicationcontrollers, label, retrylimit=30):
             labels = get_info(rc, ['spec', 'podTemplate', 'labels'])
             poddesc = '%s with labels %s' % (rc['name'], str(labels))
             if e.code == 409:
-                print('Pod %s already exists.' % poddesc)
+                # Yes we may lose some errors this way, but we don't need to
+                # be exhaustive here.
+                error = ('Pod %s already exists.' % poddesc)
+                print(error)
             else:
                 print('Error deploying pod %s.' % poddesc)
                 sys.exit(1)
@@ -540,6 +544,7 @@ def deployrcs(url, namespaces, replicationcontrollers, label, retrylimit=30):
     for rc in replicationcontrollers:
         is_pod_running(url, namespaces[0], rc['name'], 'labels.name:'+label,
                        "Running", False, retrylimit)
+    return error
 
 #------------------------------------------------------------------------------
 def rm_pod(label, context, step):
@@ -654,6 +659,39 @@ def rm_images(context):
     pass
 
 #------------------------------------------------------------------------------
+def mk_check(context):
+    url = get_cfg('api_address')
+    verbose = get_cfg('verbose')
+
+    # Determine pod limit from current config
+    try:
+        cfg = doJson('%s/.cfg/all' % url, 'PATCH')
+        if verbose:
+            print('Config:\n%s' % json.dumps(cfg, indent=4))
+    except Exception as e:
+        print('Connection error: %s' % str(e))
+        sys.exit(1)
+    limit = cfg.get('maximum_pods_per_node', 0)
+
+    # Get current pod count
+    pods = get_cfg('pods')
+    count = len(pods)
+    if verbose:
+        print('Current pod count: %s' % count)
+
+    # rsyslog, registry
+    PODS_TENANT = 2
+    # consul, rm, hs
+    PODS_CLUSTER = 3
+
+    instances = get_cfg('instances')
+    if (PODS_CLUSTER + instances + count) > limit:
+        print('Insufficient resources to deploy cluster of size %s.' %instances)
+        if (count > PODS_TENANT):
+            print('A compute cluster may already exist; '
+                  'please delete it then try again.')
+        sys.exit(1)
+
 def mk_consul(context):
     url = get_cfg('api_address')
     tenant = get_cfg('tenant_name')
@@ -664,8 +702,10 @@ def mk_consul(context):
     for rc in genconsulrcspec(networkname=network):
         replicationcontrollers.append(dm_genrcspec(**rc))
 
-    deployrcs(url, namespaces, replicationcontrollers, 'consul',
-              retrylimit=DEPLOY_CONSUL_RETRY)
+    ret = deployrcs(url, namespaces, replicationcontrollers, 'consul',
+                    retrylimit=DEPLOY_CONSUL_RETRY)
+    if ret is not None:
+        context['mk-consul-error'] = ret
 
 def rm_consul(context):
     rm_pod('consul', context, 'rm-consul')
@@ -689,8 +729,10 @@ def mk_rm(context):
     for rc in genresourcemanagerrcspec(registryip=registryip, consulip=consulip, networkname=network):
         replicationcontrollers.append(dm_genrcspec(**rc))
 
-    deployrcs(url, namespaces, replicationcontrollers, RESOURCEMANAGER,
-              retrylimit=DEPLOY_POD_RETRY)
+    ret = deployrcs(url, namespaces, replicationcontrollers, RESOURCEMANAGER,
+                    retrylimit=DEPLOY_POD_RETRY)
+    if ret is not None:
+        context['mk-rm-error'] = ret
 
 def rm_rm(context):
     rm_pod(RESOURCEMANAGER, context, 'rm-rm')
@@ -715,8 +757,10 @@ def mk_nm(context):
 
     for rc in gennodemanagerrcspec(registryip=registryip, consulip=consulip, networkname=network, replicas=replicas):
         replicationcontrollers.append(dm_genrcspec(**rc))
-    deployrcs(url, namespaces, replicationcontrollers, NODEMANAGER,
-              retrylimit=DEPLOY_POD_RETRY)
+    ret = deployrcs(url, namespaces, replicationcontrollers, NODEMANAGER,
+                    retrylimit=DEPLOY_POD_RETRY)
+    if ret is not None:
+        context['mk-nm-error'] = ret
 
 def rm_nm(context):
     rm_pod(NODEMANAGER, context, 'rm-nm')
@@ -739,8 +783,10 @@ def mk_hs(context):
 
     for rc in genhistoryserverrcspec(registryip=registryip, consulip=consulip, networkname=network):
         replicationcontrollers.append(dm_genrcspec(**rc))
-    deployrcs(url, namespaces, replicationcontrollers, HISTORYSERVER,
-              retrylimit=DEPLOY_POD_RETRY)
+    ret = deployrcs(url, namespaces, replicationcontrollers, HISTORYSERVER,
+                    retrylimit=DEPLOY_POD_RETRY)
+    if ret is not None:
+        context['mk-hs-error'] = ret
 
 def rm_hs(context):
     rm_pod(HISTORYSERVER, context, 'rm-hs')
@@ -767,6 +813,7 @@ MANUAL_ACTIONS = OrderedDict([
                         ])
 
 MK_ACTIONS = OrderedDict([
+                        ('mk-check', mk_check),
                         ('mk-consul', mk_consul),
                         ('mk-rm', mk_rm),
                         ('mk-hs', mk_hs),
@@ -873,7 +920,18 @@ if __name__ == '__main__':
             print('<<< Completed %s' % step)
 
     if command == 'create':
-        print('Success: compute cluster created.')
+        errors = ''
+        for step in steps:
+            error = context.get(step + '-error', None)
+            if error is not None:
+                errors += '\n  ' + error
+        if errors is not '':
+            print('Errors encountered:' + errors)
+            print('Done: cluster size may be incorrect as some nodes remain '
+                  'from')
+            print('a previous cluster.  Please delete and recreate cluster.')
+        else:
+            print('Success: compute cluster created.')
 
     elif command == 'delete':
         errors = ''
@@ -883,7 +941,7 @@ if __name__ == '__main__':
                 errors += '\n  ' + error
         if errors is not '':
             print('Errors encountered:' + errors)
-            print('Success: all compute cluster containers removed.')
+            print('Done: all compute cluster containers removed.')
         else:
             print('Success: compute cluster deleted.')
 
