@@ -887,6 +887,10 @@ if __name__ == '__main__':
     steps = []
     if command == 'create':
         CONFIG['instances'] = _args.get('instances', 1)
+        if (CONFIG['instances'] < 1):
+            print('Error: Invalid number of Node Manager instances (%s).' %
+                  CONFIG['instances'])
+            sys.exit(1)
         steps = list(MK_ACTIONS)
 
     elif command == 'show':
