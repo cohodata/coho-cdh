@@ -23,6 +23,7 @@ from __future__ import print_function
 
 import sys
 import time
+import datetime
 import urllib2
 import socket
 import json
@@ -149,7 +150,7 @@ def doJsonGetAll(url, params=None, timeout=0.0):
 def waitforpods(ns, url, filters, phase, checkips=True):
     # Retrieve pod list and pass filters as query string params
     if get_cfg('verbose') is True:
-        print('Waiting for pods...')
+        print('%s: Waiting for pods...' % datetime.datetime.now().isoformat())
     if get_cfg('debug') is True:
         print('{url}/ns/{ns}/pods'.format(url=url, ns=ns))
         if filters is not None:
@@ -512,11 +513,11 @@ def genhistoryserverrcspec(registryip, consulip, networkname):
 
 
 def deployrcs(url, namespaces, replicationcontrollers, label, retrylimit=30):
-
     # update the dockman spec so that the replication controllers referenence
     # images stored in the per-tenant registry.
 
     error = None
+    waitparams = []
     rcurl = os.path.join(url, 'ns', namespaces[0], 'replicationcontrollers')
     if get_cfg('verbose') is True:
         print('Data:\n%s' % json.dumps(replicationcontrollers, indent=4))
@@ -540,11 +541,36 @@ def deployrcs(url, namespaces, replicationcontrollers, label, retrylimit=30):
             print('Error deploying pod %s.' % poddesc)
             sys.exit(1)
 
-    # Wait for pod to be "Running"
-    for rc in replicationcontrollers:
-        is_pod_running(url, namespaces[0], rc['name'], 'labels.name:'+label,
-                       "Running", False, retrylimit)
-    return error
+        param = {'name': rc['name'],
+                 'label': 'labels.name:'+label,
+                 'retrylimit': retrylimit}
+        waitparams.append(param)
+
+    return error, waitparams
+
+def wait_pods(context):
+    # Wait for pods to be "Running"
+    start = datetime.datetime.now()
+    podinfo = context.get('pods-to-wait')
+    url = get_cfg('api_address')
+    tenant = get_cfg('tenant_name')
+    namespaces = [tenant]
+
+    output = ''
+    for info in podinfo:
+        start = datetime.datetime.now()
+        podname = info.get('name')
+        is_pod_running(url, namespaces[0], podname, info.get('label'),
+                       'Running', False, info.get('retrylimit'))
+        end = datetime.datetime.now()
+        output += ('  %s wait start:\t%s\n' % (podname, start.isoformat()))
+        output += ('  %s wait end:  \t%s\n' % (podname, end.isoformat()))
+
+    verbose = get_cfg('verbose')
+    if verbose:
+        sys.stdout.write(output)
+
+    context['pods-to-wait'] = []
 
 #------------------------------------------------------------------------------
 def rm_pod(label, context, step):
@@ -559,7 +585,7 @@ def rm_pod(label, context, step):
     url = os.path.join(baseurl, 'ns', tenant, 'replicationcontrollers', label)
     try:
         if get_cfg('debug') is True:
-            print('DELETE %s' % (url))
+            print('DELETE rc: %s' % (url))
         resp = doJson(url, 'DELETE')
     except HTTPError as e:
         if e.code == 404:
@@ -584,7 +610,7 @@ def rm_pod(label, context, step):
             name = get_info(pod, name_attrs)
             url = os.path.join(baseurl, 'ns', tenant, 'pods', name)
             if get_cfg('debug') is True:
-                print('DELETE: %s' % (url))
+                print('DELETE pod: %s' % (url))
             resp = doJson(url, 'DELETE')
             invalidate_pods = True
     if invalidate_pods is True:
@@ -702,10 +728,12 @@ def mk_consul(context):
     for rc in genconsulrcspec(networkname=network):
         replicationcontrollers.append(dm_genrcspec(**rc))
 
-    ret = deployrcs(url, namespaces, replicationcontrollers, 'consul',
-                    retrylimit=DEPLOY_CONSUL_RETRY)
+    ret, podinfo = deployrcs(url, namespaces, replicationcontrollers, 'consul',
+                             retrylimit=DEPLOY_CONSUL_RETRY)
     if ret is not None:
         context['mk-consul-error'] = ret
+    context['pods-to-wait'] = podinfo
+    wait_pods(context)
 
 def rm_consul(context):
     rm_pod('consul', context, 'rm-consul')
@@ -726,13 +754,15 @@ def mk_rm(context):
 
     replicationcontrollers = []
 
-    for rc in genresourcemanagerrcspec(registryip=registryip, consulip=consulip, networkname=network):
+    for rc in genresourcemanagerrcspec(registryip=registryip,
+                                       consulip=consulip, networkname=network):
         replicationcontrollers.append(dm_genrcspec(**rc))
 
-    ret = deployrcs(url, namespaces, replicationcontrollers, RESOURCEMANAGER,
-                    retrylimit=DEPLOY_POD_RETRY)
+    ret, podinfo = deployrcs(url, namespaces, replicationcontrollers,
+                          RESOURCEMANAGER, retrylimit=DEPLOY_POD_RETRY)
     if ret is not None:
         context['mk-rm-error'] = ret
+    context['pods-to-wait'] += podinfo
 
 def rm_rm(context):
     rm_pod(RESOURCEMANAGER, context, 'rm-rm')
@@ -755,12 +785,14 @@ def mk_nm(context):
 
     replicationcontrollers = []
 
-    for rc in gennodemanagerrcspec(registryip=registryip, consulip=consulip, networkname=network, replicas=replicas):
+    for rc in gennodemanagerrcspec(registryip=registryip, consulip=consulip,
+                                       networkname=network, replicas=replicas):
         replicationcontrollers.append(dm_genrcspec(**rc))
-    ret = deployrcs(url, namespaces, replicationcontrollers, NODEMANAGER,
-                    retrylimit=DEPLOY_POD_RETRY)
+    ret, podinfo = deployrcs(url, namespaces, replicationcontrollers,
+                             NODEMANAGER, retrylimit=DEPLOY_POD_RETRY)
     if ret is not None:
         context['mk-nm-error'] = ret
+    context['pods-to-wait'] += podinfo
 
 def rm_nm(context):
     rm_pod(NODEMANAGER, context, 'rm-nm')
@@ -781,12 +813,14 @@ def mk_hs(context):
 
     replicationcontrollers = []
 
-    for rc in genhistoryserverrcspec(registryip=registryip, consulip=consulip, networkname=network):
+    for rc in genhistoryserverrcspec(registryip=registryip, consulip=consulip,
+                                       networkname=network):
         replicationcontrollers.append(dm_genrcspec(**rc))
-    ret = deployrcs(url, namespaces, replicationcontrollers, HISTORYSERVER,
-                    retrylimit=DEPLOY_POD_RETRY)
+    ret, podinfo = deployrcs(url, namespaces, replicationcontrollers,
+                             HISTORYSERVER, retrylimit=DEPLOY_POD_RETRY)
     if ret is not None:
         context['mk-hs-error'] = ret
+    context['pods-to-wait'] += podinfo
 
 def rm_hs(context):
     rm_pod(HISTORYSERVER, context, 'rm-hs')
@@ -818,6 +852,7 @@ MK_ACTIONS = OrderedDict([
                         ('mk-rm', mk_rm),
                         ('mk-hs', mk_hs),
                         ('mk-nm', mk_nm),
+                        ('wait-pods', wait_pods),
                         ('get-rm', get_rm),
                         ])
 
@@ -827,6 +862,8 @@ RM_ACTIONS = OrderedDict([
                         ('rm-rm', rm_rm),
                         ('rm-consul', rm_consul),
                         ])
+
+NEED_WAIT = ['mk-rm', 'mk-hs', 'mk-nm']
 
 def argparser():
     from argparse import ArgumentParser, SUPPRESS
@@ -904,6 +941,14 @@ if __name__ == '__main__':
         CONFIG['instances'] = _args.get('instances', 1)
         CONFIG['registry_url'] = _args.get('registry_url', '')
         steps = _args.get('steps', [])
+        # In manual command, wait for each pod as it's created.
+        i = 0;
+        while True:
+            if i >= len(steps):
+                break
+            if steps[i] in NEED_WAIT:
+                steps.insert(i+1, 'wait-pods')
+            i = i+1
 
     if CONFIG['verbose'] is True:
         print(steps)
@@ -911,17 +956,21 @@ if __name__ == '__main__':
     ACTIONS.update(MK_ACTIONS)
     ACTIONS.update(RM_ACTIONS)
 
-    context = {}
+    context = { 'pods-to-wait': [] }
     for step in steps:
+        if step is '':
+            continue
         if CONFIG['verbose'] is True:
             print('----------------------------------------------------------')
-            print('>>> Starting %s' % step)
+            print('>>> %s: Starting %s' %
+                                (datetime.datetime.now().isoformat(), step))
         if not ACTIONS.has_key(step):
             print('Invalid step: %s!' % step)
             sys.exit(1)
         ACTIONS[step](context)
         if CONFIG['verbose'] is True:
-            print('<<< Completed %s' % step)
+            print('>>> %s: Completed %s' %
+                                (datetime.datetime.now().isoformat(), step))
 
     if command == 'create':
         errors = ''
