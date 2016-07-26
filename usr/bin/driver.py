@@ -29,6 +29,7 @@ import socket
 import json
 import os.path
 import base64
+import netrc
 from urlparse import urlparse
 from urllib import urlencode
 from collections import OrderedDict
@@ -839,6 +840,28 @@ def get_rm(context):
         print('No resource manager found.  Is compute cluster deployed?')
 
 #------------------------------------------------------------------------------
+def parsenetrc():
+    # Allow password specified in command line to override netrc file.
+    if CONFIG.get('password') is not None:
+        print('Using password specified by -p option.')
+        return
+
+    host = urlparse(CONFIG.get('api_address')).hostname
+    print(host)
+    try:
+        a = netrc.netrc().authenticators(host)
+        if a and (a[0] == 'admin'):
+            CONFIG['password'] = a[2]
+    except IOError as e:
+        # Do nothing if we are unable to read .netrc file
+        print('IOError: %s' % e)
+    except netrc.NetrcParseError as e:
+        # Do nothing if we are unable to parse .netrc file
+        print('Error parsing .netrc file: %s' % e)
+    except Exception as e:
+        print('Unknown error: %s' % e)
+
+#------------------------------------------------------------------------------
 MANUAL_ACTIONS = OrderedDict([
                         ('mk-tenant', mk_tenant),
                         ('mk-images', mk_images),
@@ -871,7 +894,11 @@ def argparser():
                                     'management script.')
     p.add_argument('-i', '--yarn_image', type=str, help=SUPPRESS)
     p.add_argument('-p', '--password', type=str,
-                   help='Management UI admin password')
+                   help='Management UI admin password.  '
+                        +'The password can also be specified in a netrc(5) '
+                        +'file; if it exists in the .netrc file and also given '
+                        +'on the command line, the command line value will '
+                        +'take precedence.')
     p.add_argument('-d', '--debug', action='store_true', help=SUPPRESS)
     p.add_argument('-v', '--verbose', action='store_true', help=SUPPRESS)
     p.add_argument('api_address', type=str,
@@ -920,6 +947,8 @@ if __name__ == '__main__':
     CONFIG['password']      = _args.get('password', None)
     CONFIG['yarn_image']    = _args.get('yarn_image', None)
     command = _args.get('command', '')
+
+    parsenetrc()
 
     steps = []
     if command == 'create':
