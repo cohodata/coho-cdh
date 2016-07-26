@@ -914,7 +914,7 @@ def argparser():
 
     ps = sp.add_parser('show',   help='Show compute cluster')
     ps.set_defaults(command='show')
-    pd = sp.add_parser('delete', help='Destry compute cluster')
+    pd = sp.add_parser('delete', help='Destroy compute cluster')
     pd.set_defaults(command='delete')
 
     pm = sp.add_parser('manual')
