@@ -847,7 +847,6 @@ def parsenetrc():
         return
 
     host = urlparse(CONFIG.get('api_address')).hostname
-    print(host)
     try:
         a = netrc.netrc().authenticators(host)
         if a and (a[0] == 'admin'):
