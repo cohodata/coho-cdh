@@ -102,6 +102,6 @@ RUN rm -rf /etc/hadoop/conf && \
     mv /etc/hadoop/conf.docker.yarn /etc/hadoop/conf
 
 # Driver
-ADD usr/bin/driver.py /usr/bin/driver.py
+ADD usr/bin/deploy-cdh-cluster.py /usr/bin/deploy-cdh-cluster.py
 
 ENTRYPOINT ["/usr/bin/do-with-consul"]
