@@ -852,10 +852,14 @@ def parsenetrc():
         if a and (a[0] == 'admin'):
             CONFIG['password'] = a[2]
     except IOError as e:
-        # Do nothing if we are unable to read .netrc file
-        print('IOError: %s' % e)
+        if e.errno == 2:
+            # Do nothing if .netrc file doesn't exist
+            pass
+        else:
+            # Print non-fatal error if we are unable to read .netrc file
+            print('IOError: %s' % e)
     except netrc.NetrcParseError as e:
-        # Do nothing if we are unable to parse .netrc file
+        # Print non-fatal error if we are unable to parse .netrc file
         print('Error parsing .netrc file: %s' % e)
     except Exception as e:
         print('Unknown error: %s' % e)
