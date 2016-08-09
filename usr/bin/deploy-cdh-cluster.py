@@ -834,10 +834,26 @@ def get_rm(context):
     found = False
     for pod in pods:
         if get_info(pod, label_attrs) == RESOURCEMANAGER:
-            print('Resource manager: %s' % (get_info(pod, ip_attrs)[0]))
-            found = True
+            ips = get_info(pod, ip_attrs)
+            if len(ips) > 0:
+                print('Resource manager:\t%s' % ips[0])
+                found = True
     if found is False:
-        print('No resource manager found.  Is compute cluster deployed?')
+        print('Resource manager:\tNot found.  Is compute cluster deployed?')
+
+def get_nn(context):
+    tenant = get_cfg('tenant')
+    hostIPs = tenant.get('hostIPs')
+    if hostIPs and (len(hostIPs) > 0):
+        print('Namenode:\t\t%s' % hostIPs[0])
+
+        # If we want to be fancy and show all the namenodes...
+        #if len(hostIPs) == 1:
+        #    print('Namenode:\t\t%s' % hostIPs[0])
+        #else:
+        #    print('Namenodes:\t\t%s' % hostIPs)
+    else:
+        print('Namenode:\t\tNot found.  Is compute cluster deployed?')
 
 #------------------------------------------------------------------------------
 def parsenetrc():
@@ -880,6 +896,7 @@ MK_ACTIONS = OrderedDict([
                         ('mk-nm', mk_nm),
                         ('wait-pods', wait_pods),
                         ('get-rm', get_rm),
+                        ('get-nn', get_nn),
                         ])
 
 RM_ACTIONS = OrderedDict([
@@ -963,7 +980,7 @@ if __name__ == '__main__':
         steps = list(MK_ACTIONS)
 
     elif command == 'show':
-        steps = ['get-rm']
+        steps = ['get-rm', 'get-nn']
 
     elif command == 'delete':
         steps = list(RM_ACTIONS)
