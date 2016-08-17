@@ -25,13 +25,17 @@ FROM ubuntu:14.04.4
 
 MAINTAINER support@cohodata.com
 
+ENV cdh_version 5.7.0
+LABEL com.cohodata.image="{ 'version' : '${cdh_version}' }"
+
 RUN apt-get update -y
 RUN apt-get install -y curl
 
 RUN curl -s http://archive.cloudera.com/cdh5/ubuntu/precise/amd64/cdh/archive.key | apt-key add -
-ADD https://archive.cloudera.com/cdh5/debian/wheezy/amd64/cdh/cloudera.list /etc/apt/sources.list.d/cloudera-cdh5.list 
-ADD https://archive.cloudera.com/cm5/ubuntu/trusty/amd64/cm/cloudera.list  /etc/apt/sources.list.d/cloudera-cm5.list
-
+ADD https://archive.cloudera.com/cdh5/ubuntu/trusty/amd64/cdh/cloudera.list /etc/apt/sources.list.d/cloudera-cdh5.list
+ADD https://archive.cloudera.com/cm5/ubuntu/trusty/amd64/cm/cloudera.list   /etc/apt/sources.list.d/cloudera-cm5.list
+RUN sed -i "s/\(trusty-cdh\)[^[:space:]]*/\1$cdh_version/g" /etc/apt/sources.list.d/cloudera-cdh5.list
+RUN sed -i "s/\(trusty-cdh\)[^[:space:]]*/\1$cdh_version/g" /etc/apt/sources.list.d/cloudera-cm5.list
 RUN apt-get update -y
 
 # Force apt to use zookeeper package distributed by cdh
