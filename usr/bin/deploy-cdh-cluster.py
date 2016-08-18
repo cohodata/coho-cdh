@@ -853,13 +853,11 @@ def get_nn(context):
     tenant = get_cfg('tenant')
     hostIPs = tenant.get('hostIPs')
     if hostIPs and (len(hostIPs) > 0):
-        print('Namenode:\t\t%s' % hostIPs[0])
-
-        # If we want to be fancy and show all the namenodes...
-        #if len(hostIPs) == 1:
-        #    print('Namenode:\t\t%s' % hostIPs[0])
-        #else:
-        #    print('Namenodes:\t\t%s' % hostIPs)
+        if len(hostIPs) == 1:
+            print('Namenode:\t\t%s' % hostIPs[0])
+        else:
+            hostIPs.sort()
+            print('Namenodes (%d):\t\t%s' % (len(hostIPs), ', '.join(hostIPs)))
     else:
         print('Namenode:\t\tNot found.  Is compute cluster deployed?')
 
