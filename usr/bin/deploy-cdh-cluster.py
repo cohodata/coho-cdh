@@ -826,6 +826,14 @@ def mk_hs(context):
 def rm_hs(context):
     rm_pod(HISTORYSERVER, context, 'rm-hs')
 
+def get_consul(context):
+    consulip = get_cfg('consulip')
+    print('Consul IP:\t\t%s' % consulip)
+
+def get_registry(context):
+    registryip = get_cfg('registryip')
+    print('Registry IP:\t\t%s' % registryip)
+
 def get_rm(context):
     label_attrs = ['labels', 'name']
     name_attrs = ['name']
@@ -895,6 +903,8 @@ MK_ACTIONS = OrderedDict([
                         ('mk-hs', mk_hs),
                         ('mk-nm', mk_nm),
                         ('wait-pods', wait_pods),
+                        ('get-consul', get_consul),
+                        ('get-registry', get_registry),
                         ('get-rm', get_rm),
                         ('get-nn', get_nn),
                         ])
@@ -980,7 +990,7 @@ if __name__ == '__main__':
         steps = list(MK_ACTIONS)
 
     elif command == 'show':
-        steps = ['get-rm', 'get-nn']
+        steps = ['get-consul', 'get-registry', 'get-rm', 'get-nn']
 
     elif command == 'delete':
         steps = list(RM_ACTIONS)
