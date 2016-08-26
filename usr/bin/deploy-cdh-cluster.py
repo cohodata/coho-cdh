@@ -698,7 +698,9 @@ def mk_check(context):
     except Exception as e:
         print('Connection error: %s' % str(e))
         sys.exit(1)
-    limit = cfg.get('maximum_pods_per_node', 0)
+    default_pods_per_node = cfg.get('default_pods_per_node', 0)
+    num_nodes             = cfg.get('num_nodes', 0)
+    pod_limit = default_pods_per_node * num_nodes
 
     # Get current pod count
     pods = get_cfg('pods')
@@ -711,12 +713,19 @@ def mk_check(context):
     # consul, rm, hs
     PODS_CLUSTER = 3
 
+    if (count > PODS_TENANT):
+        print('A compute cluster may already exist; '
+              'please delete it then try again.')
+        sys.exit(1)
+
     instances = get_cfg('instances')
-    if (PODS_CLUSTER + instances + count) > limit:
+    if instances > num_nodes:
+        print('There are %d MicroArrays in the system; at most one nodemanager'
+              ' can be deployed on each MicroArray.' % num_nodes)
+        sys.exit(1)
+
+    if (PODS_CLUSTER + instances + count) > pod_limit:
         print('Insufficient resources to deploy cluster of size %s.' %instances)
-        if (count > PODS_TENANT):
-            print('A compute cluster may already exist; '
-                  'please delete it then try again.')
         sys.exit(1)
 
 def mk_consul(context):
@@ -988,7 +997,7 @@ if __name__ == '__main__':
         steps = list(MK_ACTIONS)
 
     elif command == 'show':
-        steps = ['get-consul', 'get-registry', 'get-rm', 'get-nn']
+        steps = ['get-registry', 'get-consul', 'get-rm', 'get-nn']
 
     elif command == 'delete':
         steps = list(RM_ACTIONS)
