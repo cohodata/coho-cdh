@@ -720,8 +720,14 @@ def mk_check(context):
 
     instances = get_cfg('instances')
     if instances > num_nodes:
-        print('There are %d MicroArrays in the system; at most one nodemanager'
-              ' can be deployed on each MicroArray.' % num_nodes)
+        msg = 'There '
+        if num_nodes == 1:
+            msg += 'is 1 MicroArray'
+        else:
+            msg += ('are %d MicroArrays' % num_nodes)
+        msg += ' in the system capable of deploying compute nodes; at most one'
+        msg += ' nodemanager can be deployed on each such MicroArray.'
+        print(msg)
         sys.exit(1)
 
     if (PODS_CLUSTER + instances + count) > pod_limit:
