@@ -99,7 +99,7 @@ ENV CONSUL_RETRY_MAX 10
 
 ENV COHO_TENANT namespace1
 ENV COHO_HADOOP_CLUSTER dc
-ENV WITH_COHO_HADOOP_TOPOLOGY true
+ENV WITH_COHO_HADOOP_TOPOLOGY false
 
 # This image will be used to set up a Yarn cluster
 RUN rm -rf /etc/hadoop/conf && \
