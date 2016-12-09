@@ -35,7 +35,6 @@ ADD https://archive.cloudera.com/cdh5/ubuntu/trusty/amd64/cdh/cloudera.list /etc
 ADD https://archive.cloudera.com/cm5/ubuntu/trusty/amd64/cm/cloudera.list   /etc/apt/sources.list.d/cloudera-cm5.list
 RUN sed -i "s/\(trusty-cdh\)[^[:space:]]*/\1$cdh_version/g" /etc/apt/sources.list.d/cloudera-cdh5.list
 RUN sed -i "s/\(trusty-cdh\)[^[:space:]]*/\1$cdh_version/g" /etc/apt/sources.list.d/cloudera-cm5.list
-RUN apt-get update -y
 
 # Force apt to use zookeeper package distributed by cdh
 RUN echo '' >> /etc/apt/preferences
@@ -43,6 +42,7 @@ RUN echo 'Package: zookeeper' >> /etc/apt/preferences
 RUN echo 'Pin: origin archive.cloudera.com' >> /etc/apt/preferences
 RUN echo 'Pin-Priority: 600' >> /etc/apt/preferences
 
+RUN apt-get update -y
 RUN apt-get install -y ant \
                        unzip \
                        wget \
