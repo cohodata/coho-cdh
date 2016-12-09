@@ -175,9 +175,8 @@ following conditions.
         applicable to the Acquired Materials.
      4. The Acquired Materials ::
         A. May include the following
-           i.   Cloudera CDH 5.7
-           ii.  Consul 0.5.0
-           iii. Ubuntu 14.04
+           i.  Cloudera CDH 5.7
+           ii. Ubuntu 14.04
         B. And shall include any further materials or subject matter
            identified as such in the accompanying documentation, manifest file,
            or similar.

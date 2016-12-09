@@ -18,7 +18,6 @@
 # Installs:
 # - Oracle JDK 7
 # - CDH5 Hadoop
-# - Consul agent
 # - some utilities
 
 FROM ubuntu:14.04.4
@@ -52,9 +51,7 @@ RUN apt-get install -y ant \
                        emacs \
                        rsync \
                        iputils-ping \
-                       jq \
                        net-tools \
-                       openssh-server \
                        python \
                        oracle-j2sdk1.7 \
                        hadoop-yarn-resourcemanager \
@@ -70,36 +67,8 @@ ENV LOGGER_ENV_VAR "INFO,console"
 
 # Add Hadoop scripts
 ADD usr/local/bin/cio-hadoop-run                          /usr/local/bin/cio-hadoop-run
-ADD usr/local/bin/cio-hadoop-topology                     /usr/local/bin/cio-hadoop-topology
 ADD usr/lib/hadoop-yarn/sbin/yarn-daemon.sh               /usr/lib/hadoop-yarn/sbin/yarn-daemon.sh
 ADD usr/lib/hadoop-mapreduce/sbin/mr-jobhistory-daemon.sh /usr/lib/hadoop-mapreduce/sbin/mr-jobhistory-daemon.sh
-
-# Install consul
-ADD https://releases.hashicorp.com/consul/0.5.2/consul_0.5.2_linux_amd64.zip /tmp/consul.zip
-RUN unzip /tmp/consul.zip -d /usr/bin/
-
-# Consul
-ADD usr/bin/do-with-consul                                              /usr/bin/do-with-consul
-ADD etc/consul.d  /etc/consul.d
-RUN mkdir -p /var/consul/data
-ENV WITH_CONSUL true
-# The retry interval and retry max control how long the
-# consul agent will attempt to retry joining the cluster.
-# NB: CONSUL_RETRY_MAX==0 causes the agent to retry indefinately.
-ENV CONSUL_RETRY_INTERVAL 30
-ENV CONSUL_RETRY_MAX 10
-
-# Cluster configuration parameters used to qualify consul node lookups.
-# COHO_TENANT: the name of tenant network that this node is a member of
-# COHO_HADOOP_CLUSTER: the name of the hadoop cluster which this node is a member of
-# WITH_COHO_HADOOP_TOPOLOGY: set to false to disable container topology location
-
-# For example the FQDN of a node with hostname resourcemanager node be:
-# resourcemanager.${COHO_HADOOP_CLUSTER}.${COHO_TENANT}.node.dc1.consul
-
-ENV COHO_TENANT namespace1
-ENV COHO_HADOOP_CLUSTER dc
-ENV WITH_COHO_HADOOP_TOPOLOGY false
 
 # This image will be used to set up a Yarn cluster
 RUN rm -rf /etc/hadoop/conf && \
@@ -108,4 +77,4 @@ RUN rm -rf /etc/hadoop/conf && \
 # Driver
 ADD usr/bin/deploy-cdh-cluster.py /usr/bin/deploy-cdh-cluster.py
 
-ENTRYPOINT ["/usr/bin/do-with-consul"]
+CMD ["/usr/local/bin/cio-hadoop-run"]

@@ -3,4 +3,3 @@ includes, but is not limited to, the following:
 
 * Ubuntu (http://ubuntu.com)
 * Cloudera Hadoop Distribution (http://cloudera.com)
-* Consul (http://consul.io)

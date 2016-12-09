@@ -23,12 +23,6 @@
     <value>hdfs://namenode:8020</value>
   </property>
 
-  <!-- script run by the scheduler determine rack location of IPs -->
-  <property>
-    <name>net.topology.script.file.name</name>
-    <value>/usr/local/bin/cio-hadoop-topology</value>
-  </property>
-
   <!-- OOZIE proxy user setting -->
   <property>
     <name>hadoop.proxyuser.oozie.hosts</name>

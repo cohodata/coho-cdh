@@ -80,47 +80,6 @@ if [[ -z "$IP" ]]; then
   exit 1
 fi
 
-if [[ -z "$COHO_TENANT" ]]; then
-  echo "COHO_TENANT not specified; not writing rack location."
-  WITH_COHO_HADOOP_TOPOLOGY=false
-fi
-if [[ -z "$COHO_CLUSTER_UUID" ]]; then
-  echo "COHO_CLUSTER_UUID not specified; not writing rack location."
-  WITH_COHO_HADOOP_TOPOLOGY=false
-fi
-if [[ -z "$COHO_NODE_UUID" ]]; then
-  echo "COHO_NODE_UUID not specified; not writing rack location."
-  WITH_COHO_HADOOP_TOPOLOGY=false
-fi
-
-# Write this container's location into the topology mapping.
-# Note that we write two entries, one with the container's IP and another
-# with the container's short hostname because the resource manager has been
-# observed to resolve NodeManager locations by both name and IP.
-NAME=$(hostname -s)
-RACK="coho/${COHO_TENANT}/hdfs/topology/${COHO_CLUSTER_UUID}/${COHO_NODE_UUID}"
-LOCATION_IP="${RACK}/${IP}"
-LOCATION_NAME="${RACK}/${NAME}"
-CTIME=$(date +%s)
-
-
-# Preserve COHO environment variables by writing them to /tmp files.
-# They are used by /usr/local/bin/cio-hadoop-topology which is
-# launched from the YARN resourcemanager service, but all environment
-# variables are wiped upon service startup (and listing them in /etc/environment
-# does not keep them from being wiped).
-echo "$WITH_COHO_HADOOP_TOPOLOGY" > /tmp/WITH_COHO_HADOOP_TOPOLOGY
-
-if [ "$WITH_COHO_HADOOP_TOPOLOGY" != "false" ]; then
-    echo "Writing container's rack location."
-    curl -X PUT -d $CTIME http://127.0.0.1:8500/v1/kv/${LOCATION_IP}
-    curl -X PUT -d $CTIME http://127.0.0.1:8500/v1/kv/${LOCATION_NAME}
-
-    echo "$COHO_TENANT" > /tmp/COHO_TENANT
-    echo "$COHO_CLUSTER_UUID" > /tmp/COHO_CLUSTER_UUID
-    echo "$COHO_NODE_UUID" > /tmp/COHO_NODE_UUID
-fi
-
 if [ "$make_local_dir" != "false" ]; then
     local_dir="$local_dir_base/$(cat /proc/sys/kernel/random/uuid)"
 
@@ -133,6 +92,25 @@ if [ "$make_local_dir" != "false" ]; then
     # Update the configuration files
     sed -i "s|LOCAL_DIR_OVERRIDE|${local_dir}|" $local_dir_conf_file
 fi
+
+# Determine the UUID of the MicroArray that is running this container
+UUID=$(grep "^UUID=" /install_info  | awk -F= '{print $2}')
+if [[ -z "$UUID" ]]; then
+    echo "Could not determine microarray UUID from /install_info"
+    echo "Container must be run with -v /opt/cio/etc/install_info:/install_info:ro"
+    exit 1
+fi
+
+# Pull the address of the namenode service from consul
+NN=$(curl -s http://consul:8500/v1/catalog/service/namenode)
+NNIP=$(echo "$NN" | python -c "import sys, json; print next((s['Address'] for s in json.load(sys.stdin) if s['Node'] == '$UUID'))")
+if [[ -z "$NNIP" ]]; then
+    echo "Could not determine IP of namenode running on microarray $UUID"
+    echo "namenode services registered with consul are: $NN"
+    exit 1
+fi
+
+echo "$NNIP namenode" >> /etc/hosts
 
 service $service_script start
 RESULT=$?
@@ -150,12 +128,6 @@ fi
 if [ "$make_local_dir" != "false" ]; then
     echo "Removing nm-local-dir: $nm_local_dir"
     rm -rf $nm_local_dir
-fi
-
-if [ "$WITH_COHO_HADOOP_TOPOLOGY" != "false" ]; then
-    echo "Removing container's rack location."
-    curl -X DELETE http://127.0.0.1:8500/v1/kv/${LOCATION_IP}
-    curl -X DELETE http://127.0.0.1:8500/v1/kv/${LOCATION_NAME}
 fi
 
 exit $RESULT
