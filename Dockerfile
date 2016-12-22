@@ -27,8 +27,7 @@ MAINTAINER support@cohodata.com
 ENV cdh_version 5.7.0
 LABEL com.cohodata.image="{ 'version' : '${cdh_version}' }"
 
-RUN apt-get update -y
-RUN apt-get install -y curl
+RUN apt-get update -y && apt-get install -y curl
 
 RUN curl -s http://archive.cloudera.com/cdh5/ubuntu/precise/amd64/cdh/archive.key | apt-key add -
 ADD https://archive.cloudera.com/cdh5/ubuntu/trusty/amd64/cdh/cloudera.list /etc/apt/sources.list.d/cloudera-cdh5.list
@@ -42,8 +41,7 @@ RUN echo 'Package: zookeeper' >> /etc/apt/preferences
 RUN echo 'Pin: origin archive.cloudera.com' >> /etc/apt/preferences
 RUN echo 'Pin-Priority: 600' >> /etc/apt/preferences
 
-RUN apt-get update -y
-RUN apt-get install -y ant \
+RUN apt-get update -y && apt-get install -y ant \
                        unzip \
                        wget \
                        lbzip2 \
