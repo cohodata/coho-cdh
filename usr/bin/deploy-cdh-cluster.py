@@ -460,7 +460,7 @@ def genconsulrcspec(networkname):
               name='consul',
               image='registry:5000/coho/consul',
               volspec=[consul_vol],
-              command=['agent -bootstrap -server -data-dir=/var/lib/consul -log-level=debug'])
+              command=['agent', '-bootstrap', '-server', '-data-dir=/var/lib/consul', '-log-level=debug'])
 
 def genresourcemanagerrcspec(registryip, consulip, networkname):
     env=getconsulenv(consulip)
