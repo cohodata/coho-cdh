@@ -72,6 +72,9 @@ ADD usr/lib/hadoop-mapreduce/sbin/mr-jobhistory-daemon.sh /usr/lib/hadoop-mapred
 RUN rm -rf /etc/hadoop/conf && \
     mv /etc/hadoop/conf.docker.yarn /etc/hadoop/conf
 
+# Docker compose
+ADD usr/local/bin/docker-compose-Linux-x86_64-1.9.0 /usr/local/bin/docker-compose
+
 # Driver
 ADD usr/bin/deploy-cdh-cluster.py /usr/bin/deploy-cdh-cluster.py
 
