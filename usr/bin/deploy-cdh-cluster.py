@@ -18,120 +18,53 @@
 # said licenses or your compliance or non-compliance.
 #------------------------------------------------------------------------------
 
-"""Script to drive the dockman API from the command line"""
+"""Script to deploy a CDH compute cluster on a Coho Data DataStream
+system.
+
+
+To run this script, you will need:
+
+  - the location of the tenant's docker portal
+    ie. tcp://<portal_IP>:<port>
+
+  - the yarn image on the tenant's docker registry
+    ie. <registry_ip>:5000/cohodata/yarn:5.0
+
+
+First, the image must be pushed to the tenant's docker registry:
+    $ docker pull cohodata/yarn:5.0
+    $ docker tag cohodata/yarn:5.0 <registry_ip>:5000/cohodata/yarn:5.0
+    $ docker push <registry_ip>:5000/cohodata/yarn:5.0
+
+The deployment script can then be run from a container with the image:
+    $ docker run --rm -ti cohodata/yarn:5.0 /usr/bin/deploy-cdh-cluster.py --docker-portal=<portal_addr> --yarn-image=<registry_ip>:5000/cohodata/yarn:5.0 create <number_of_nodemanagers>
+"""
 from __future__ import print_function
 
 import sys
-import time
 import datetime
-import urllib2
-import socket
-import json
-import os.path
-import base64
 import tempfile
-from urlparse import urlparse
-from urllib import urlencode
 from collections import OrderedDict
-from functools import partial
-from subprocess import check_output
+import subprocess
 
-# pacify newer ssl libraries
-import ssl
-setattr(ssl, '_create_default_https_context',
-        getattr(ssl, '_create_unverified_context', None))
-
-DEFAULT_VLANID = 2100
-DEFAULT_VLANSUBNET = '172.20.31.0/24'
-DEFAULT_GATEWAY = DEFAULT_VLANSUBNET.replace('0/24', '1')
 RESOURCEMANAGER = 'resourcemanager'
 NODEMANAGER = 'nodemanager'
 HISTORYSERVER = 'historyserver'
-YARN_IMAGE = 'cohodata/yarn:2.9'
+YARN_IMAGE = 'cohodata/yarn:5.0'
 DEFAULT_NMVOLTYPE = 'temporary'
 DEFAULT_NMVOLSIZE = 3000
 
+DOCKER_COMPOSE = '/usr/local/bin/docker-compose'
+
 CONFIG = {}
-
-#------------------------------------------------------------------------------
-class HTTPFollowRedirectHandler(urllib2.HTTPRedirectHandler):
-    def __init__(self):
-        pass
-
-    def redirect_request(self, req, fp, code, msg, headers, newurl):
-        data = None
-        if req.has_data():
-            data = req.get_data()
-        r = urllib2.Request(newurl, headers=req.headers, data=data)
-        r.get_method = req.get_method
-        return r
-
-class HTTPError(Exception):
-    """HTTP exception class with better default printout"""
-    def __init__(self, errobj, code=None, content=None, url=None):
-        super(HTTPError, self).__init__()
-        self.code = code or errobj.code
-        self.content = content or errobj.read()
-        self.url = url or errobj.geturl()
-
-    def __str__(self):
-        return "Code (%d) for URL (%s)" % (self.code, self.url)
-
-def doHTTP(url, method, params=None, data=None, timeout=0.0):
-    if params:
-        url += "?" + urlencode(params)
-    url_info = urlparse(url)
-    user = get_cfg('user')
-    password = get_cfg('password')
-    if password is not None:
-        b64 = base64.encodestring('%s:%s' % (user, password))[:-1]
-    opener = urllib2.build_opener(HTTPFollowRedirectHandler)
-    if data:
-        post_data = json.dumps(data)
-        request = urllib2.Request(url, data=post_data)
-    else:
-        request = urllib2.Request(url)
-    request.add_header('Content-Type', 'application/json')
-    if password is not None:
-        request.add_header('Authorization', 'Basic %s' % b64)
-    request.get_method = lambda: method
-    try:
-        if timeout > 0.0:
-            rep = opener.open(request, timeout=timeout)
-        else:
-            # None or 0.0 => no timeout
-            rep = opener.open(request)
-
-        return rep.read()
-
-    except urllib2.HTTPError as err:
-        if err.code == 401:
-            print('Connection error: 401 Unauthorized.\n'
-                  'Please ensure that the password is correct.')
-            sys.exit(1)
-        elif err.code == 403:
-            print('Connection error: 403 Forbidden.\n'
-                  'Please ensure that microservices are enabled.')
-            sys.exit(1)
-        else:
-            raise HTTPError(err)
-    except socket.timeout as e:
-        print('Connection error: timeout.')
-        sys.exit(1)
-    except urllib2.URLError as e:
-        # Connection timeouts can trigger ENETUNREACH
-        print('Connection error: Host unreachable.')
-        sys.exit(1)
-
-def doJson(url, method, params=None, data=None, timeout=0.0):
-    x = doHTTP(url, method, params=params, data=data, timeout=timeout)
-    return json.loads(x) if x else None
 
 #------------------------------------------------------------------------------
 # We store everything in a global CONFIG dictionary so that when multiple steps
 # are run in the same script invocation, we don't keep fetching the same bits
 # of information over and over from the API.
 def get_cfg(key):
+    """Retrieve configuration values"""
+
     value = CONFIG.get(key, None)
     if value is not None:
         return value
@@ -140,31 +73,9 @@ def get_cfg(key):
     if key == 'yarn_image':
         CONFIG[key] = YARN_IMAGE
 
-    elif key == 'yarn_image_path':
-        registry = get_cfg('registry')
-        image = get_cfg('yarn_image')
-        if registry is not None:
-            CONFIG[key] = '%s/%s' % (registry, image)
-        else:
-            CONFIG[key] = image
-
-    elif key == 'vlanid':
-        CONFIG[key] = DEFAULT_VLANID
-
-    elif key == 'vlan_subnet':
-        CONFIG[key] = DEFAULT_VLANSUBNET
-
-    elif key == 'nodemanager_voltype':
-        CONFIG[key] = DEFAULT_NMVOLTYPE
-
-    elif key == 'nodemanager_volsize':
-        CONFIG[key] = DEFAULT_NMVOLSIZE
-
     elif key == 'docker_portal':
-        get_portal(None)
-
-    elif key == 'registry':
-        get_registry(None)
+        print('A docker portal address must be specified.')
+        sys.exit(1)
 
     else:
         return None
@@ -173,88 +84,100 @@ def get_cfg(key):
 
 
 #------------------------------------------------------------------------------
-def _url(ssappip):
-    base = 'https://%s/api' % ssappip
-    return os.path.join(base, 'mgmt-data', 'config', 'microservices', 'config')
-
-#------------------------------------------------------------------------------
 #------------------------------------------------------------------------------
 # Functions for defining the docker compose recipe
 
 #------------------------------------------------------------------------------
 def compose_nmvolname(node):
+    """Return the name of a nodemanager volume"""
+
     return 'nodemanager{:08d}-vol'.format(node)
 
 #------------------------------------------------------------------------------
 def compose_list(label, values, indent_level):
-    INDENT = 4
-    prefix = ' ' * indent_level * INDENT
+    """Returns a list given an array of values and an indent level"""
+
+    indent = 4
+    prefix = ' ' * indent_level * indent
     ret = ''
     if label is not None:
         ret += prefix + label + ':\n'
-        prefix += ' ' * INDENT
-    for v in values:
-        ret += prefix + v + '\n'
+        prefix += ' ' * indent
+    for val in values:
+        ret += prefix + val + '\n'
     return ret
 
 #------------------------------------------------------------------------------
-def compose_service(name, command, role=None, volumes=None, depends=None,
+#pylint: disable=too-many-arguments
+def compose_service(name, cmd, role=None, volumes=None, depends=None,
                     options=None):
-    env=''
+    """Returns a docker compose recipe stanza describing a service"""
+
+    env = ''
     if role is not None:
         env = compose_list('environment', ['ROLE: \'%s\'' % role], 2)
 
-    vol=''
+    vol = ''
     if volumes is not None:
         vol = compose_list('volumes', ['- %s' % v for v in volumes], 2)
 
-    dep=''
+    dep = ''
     if depends is not None:
         dep = compose_list('depends_on', ['- %s' % d for d in depends], 2)
 
-    extra=''
+    extra = ''
     if options is not None:
         extra = compose_list(None, options, 2)
 
-    image = get_cfg('yarn_image_path')
+    image = get_cfg('yarn_image')
     stanza = r"""    %s:
         container_name: %s
         image: %s
         command: %s
-%s%s%s%s""" % (name, name, image, command, env, vol, dep, extra)
+%s%s%s%s""" % (name, name, image, cmd, env, vol, dep, extra)
     stanza += '\n'
     return stanza
+#pylint: enable=too-many-arguments
 
 #------------------------------------------------------------------------------
 INSTALL_INFO = '/opt/cio/etc/install_info:/install_info:ro'
 HADOOP_RUN = '/usr/local/bin/cio-hadoop-run'
 
 def compose_hadoop_service(name):
-    return compose_service(name,
-                           [ HADOOP_RUN, '--name=%s' % name ],
-                           role = '%s' % name,
-                           volumes = [INSTALL_INFO])
+    """Returns a docker compose recipe stanza describing a hadoop service"""
 
-def compose_hadoop_nm(nodes = []):
+    return compose_service(name,
+                           [HADOOP_RUN, '--name=%s' % name],
+                           role=('%s' % name),
+                           volumes=[INSTALL_INFO])
+
+def compose_hadoop_nm(nodes=()):
+    """Returns a docker compose recipe stanza describing a nodemanager"""
+
     stanza = ''
     for node in nodes:
         name = 'nodemanager{:08d}'.format(node)
         tmpvol = compose_nmvolname(node)
         stanza += compose_service(name,
                                   '\'%s\'' % HADOOP_RUN,
-                                  role = 'nodemanager',
-                                  volumes = [INSTALL_INFO, '%s:/mnt' % tmpvol],
-                                  depends = ['resourcemanager','historyserver'])
+                                  role='nodemanager',
+                                  volumes=[INSTALL_INFO, '%s:/mnt' % tmpvol],
+                                  depends=['resourcemanager', 'historyserver'])
     return stanza
 
 def compose_hadoop_client():
+    """Returns a docker compose recipe stanza describing a hadoop client"""
+
     return compose_service('client',
                            '\'/bin/bash\'',
-                           depends = ['resourcemanager'],
-                           options = ['user: hdfs', 'stdin_open: true', 'tty: true'])
+                           depends=['resourcemanager'],
+                           options=['user: hdfs', 'stdin_open: true',
+                                    'tty: true'])
 
 #------------------------------------------------------------------------------
-def compose_services(nodes = []):
+def compose_services(nodes=()):
+    """Returns a docker compose recipe stanza describing services"""
+
     stanza = 'services:\n'
     stanza += compose_hadoop_service('resourcemanager')
     stanza += compose_hadoop_service('historyserver')
@@ -264,6 +187,8 @@ def compose_services(nodes = []):
 
 #------------------------------------------------------------------------------
 def compose_volume(name, voltype, size):
+    """Returns a docker compose recipe stanza describing a volume"""
+
     stanza = r"""    %s:
         driver: cohovolume
         driver_opts:
@@ -272,18 +197,22 @@ def compose_volume(name, voltype, size):
     return stanza
 
 #------------------------------------------------------------------------------
-def compose_volumes(nodes = []):
+def compose_volumes(nodes=()):
+    """Returns a docker compose recipe stanza describing volumes"""
+
     stanza = 'volumes:\n'
     for node in nodes:
         name = compose_nmvolname(node)
-        voltype = get_cfg('nodemanager_voltype')
-        size = get_cfg('nodemanager_volsize')
+        voltype = DEFAULT_NMVOLTYPE
+        size = DEFAULT_NMVOLSIZE
         stanza += compose_volume(name, voltype, size)
         stanza += '\n'
     return stanza
 
 #------------------------------------------------------------------------------
 def compose_network(network):
+    """Returns a docker compose recipe stanza describing a network"""
+
     stanza = r"""    default:
         external:
             name: %s""" % (network)
@@ -291,6 +220,8 @@ def compose_network(network):
 
 #------------------------------------------------------------------------------
 def compose_networks(networks):
+    """Returns a docker compose recipe stanza describing networks"""
+
     stanza = 'networks:\n'
     for network in networks:
         stanza += compose_network(network)
@@ -299,99 +230,14 @@ def compose_networks(networks):
 
 #------------------------------------------------------------------------------
 #------------------------------------------------------------------------------
-# These are used for debugging only.
-def mserv_config(context, config, step='mserv-config'):
-    url = get_cfg('mserv_cfg')
-
-    cmd = 'curl -k -X PUT -H Content-Type:application/json -d'.split()
-    cmd.append(json.dumps(config))
-    cmd.append(url)
-    print(cmd)
-    try:
-        ret = check_output(cmd)
-        print(ret)
-    except Exception as e:
-        error = str(e)
-        context[step + '-error'] = error
-
-def enable_mserv(context):
-    print('Enabling microservices')
-    config = { 
-        "orchestration_engine": "swarm",
-        "enabled": True,
-        "gateway": DEFAULT_GATEWAY,
-        "single_tenant": True,
-        "subnet": DEFAULT_VLANSUBNET,
-        "vlan": DEFAULT_VLANID,
-    }
-    mserv_config(context, config)
-
-def disable_mserv(context):
-    print('Disabling microservices')
-    config = { 
-        "enabled": False,
-    }
-    mserv_config(context, config)
-
-
-#------------------------------------------------------------------------------
-#------------------------------------------------------------------------------
-def mk_check(context):
-    # Verify that the user is not deploying more nodes than MAs in the cluster.
-    # But, without dockman, there is no way to determine how many MAs we have.
+def mk_check():
+    """Verify that the user is not deploying more nodes than MAs in the
+       cluster.  Once we have docker-py, we can use docker info"""
     pass
 
-def get_registry(context):
-    debug = get_cfg('debug')
-    portal = get_cfg('docker_portal')
+def compose_recipe(nodes):
+    """Returns a docker compose recipe for the CDH cluster"""
 
-    cmd = 'docker -H'.split()
-    cmd.append(portal)
-    cmd.append('inspect')
-    cmd.append('--format')
-    cmd.append('{{.NetworkSettings.Networks.network0.IPAddress}}')
-    cmd.append('registry')
-    if debug:
-        print(cmd)
-    try:
-        registry = check_output(cmd)
-        if registry is None:
-            error = 'No docker portal found!'
-            print(error)
-            sys.exit(1)
-        else:
-            CONFIG['registry'] = registry.strip() + ':5000'
-            if debug:
-                print('Docker registry: %s' % get_cfg('registry'))
-    except Exception as e:
-        error = str(e)
-        sys.exit(1)
-
-def get_portal(context):
-    debug = get_cfg('debug')
-    url = get_cfg('mserv_cfg')
-    resp = doJson(url, 'GET')
-
-    if debug:
-        print(url)
-        print('Response:\n%s' % resp)
-
-    portal = resp.get('docker_portal', None)
-    if portal is None or not portal:
-        print('No docker portal found; are microservices enabled?')
-        sys.exit(1)
-    else:
-        CONFIG['docker_portal'] = portal
-        if debug:
-            print('Docker swarm portal: tcp://%s' % portal)
-
-def show(context):
-    registry = get_cfg('registry')
-    portal = get_cfg('docker_portal')
-    print('Docker registry:     %s' % get_cfg('registry'))
-    print('Docker swarm portal: tcp://%s' % portal)
-
-def compose_recipe(context, nodes):
     if nodes is None or not nodes:
         nodes = [0]
     networks = ['network0']
@@ -402,38 +248,43 @@ def compose_recipe(context, nodes):
     stanzas += '\n'
     stanzas += compose_networks(networks)
     stanzas += '\n'
-    if get_cfg('verbose'):
+    if get_cfg('debug'):
         print(stanzas)
     return stanzas
 
-def compose_command(context, command, recipe, step=''):
+def compose_command(cmd, recipe):
+    """Executes docker-compose command against a recipe"""
+
     portal = get_cfg('docker_portal')
     debug = get_cfg('debug')
-    verbose = get_cfg('verbose')
     with tempfile.NamedTemporaryFile(delete=not debug) as recipefile:
         recipefile.write(recipe)
         recipefile.flush()
         yaml = recipefile.name
-        rawcmd = 'docker-compose -H %s -f %s %s' % (portal, yaml, command)
+        rawcmd = '%s -H %s -f %s %s' % (DOCKER_COMPOSE, portal, yaml, cmd)
         if debug:
             print('docker-compose recipe file: %s' % yaml)
-        if verbose:
             print('Command: %s' % rawcmd)
-        cmd = rawcmd.split()
+        splitcmd = rawcmd.split()
         try:
-            ret = check_output(cmd)
+            ret = subprocess.check_output(splitcmd)
             print(ret)
-        except Exception as e:
-            error = str(e)
-            context[step + '-error'] = error
+        except subprocess.CalledProcessError as exc:
+            error = 'Running docker-compose %s error: %s' % (cmd, str(exc))
+            print(error)
+            sys.exit(1)
 
 
-def compose_up(context):
+def compose_up():
+    """Executes docker-compose up -d"""
+
     nodes = xrange(get_cfg('instances'))
-    recipe = compose_recipe(context, nodes)
-    return compose_command(context, 'up -d', recipe, 'up')
+    recipe = compose_recipe(nodes)
+    return compose_command('up -d', recipe)
 
-def compose_down(context):
+def compose_down():
+    """Executes docker-compose down"""
+
     # We can't expect that the docker-compose recipe file used to create the
     # cluster is still available when it comes time to delete the cluster.
     # Yet, we don't want the user to have to specify the number of nodemanager
@@ -448,152 +299,92 @@ def compose_down(context):
     # orphans when the cluster is taken down, and we ask docker-compose to
     # remove the orphans.
     nodes = [99999999]
-    recipe = compose_recipe(context, nodes)
-    return compose_command(context, 'down --remove-orphans', recipe, 'down')
+    recipe = compose_recipe(nodes)
+    return compose_command('down --remove-orphans', recipe)
 
 #------------------------------------------------------------------------------
-MANUAL_ACTIONS = OrderedDict([
-                        ('enable-mserv', enable_mserv),
-                        ('disable-mserv', disable_mserv),
-                        ])
+MK_ACTIONS = OrderedDict([('mk-check', mk_check),
+                          ('up', compose_up),
+                         ])
 
-MK_ACTIONS = OrderedDict([
-                        ('mk-check', mk_check),
-                        ('get-portal', get_portal),
-                        ('get-registry', get_registry),
-                        ('show', show),
-                        ('up', compose_up),
-                        ])
-
-RM_ACTIONS = OrderedDict([
-                        ('down', compose_down),
-                        ])
+RM_ACTIONS = OrderedDict([('down', compose_down),
+                         ])
 
 def argparser():
+    """Parse arugments"""
+
     from argparse import ArgumentParser, SUPPRESS
-    p = ArgumentParser(description='COHO CDH Hadoop compute cluster '
-                                    'management script.')
-    p.add_argument('-i', '--yarn_image', type=str, help=SUPPRESS)
-    p.add_argument('-d', '--debug', action='store_true', help=SUPPRESS)
-    p.add_argument('-v', '--verbose', action='store_true', help=SUPPRESS)
-    p.add_argument('management_address', type=str,
-                   help='IP address of the Coho Data Management API')
-    sp = p.add_subparsers(metavar='command',
-                          dest='command',
-                          help='One of: create, show, delete')
+    parse = ArgumentParser(description='COHO CDH Hadoop compute cluster '
+                           'management script.')
+    parse.add_argument('-p', '--docker-portal', type=str,
+                       help='The docker portal, with port suffix')
+    parse.add_argument('-i', '--yarn-image', type=str,
+                       help='Yarn image, with the registry and tag')
+    parse.add_argument('-d', '--debug', action='store_true', help=SUPPRESS)
+    subp = parse.add_subparsers(metavar='command',
+                                dest='command',
+                                help='One of: create, delete')
 
-    pc = sp.add_parser('create', help='Create compute cluster')
-    pc.set_defaults(command='create')
-    pc.add_argument('instances', type=int,
-                    help='Number of Node Manager instances to deploy')
+    pcreate = subp.add_parser('create', help='Create compute cluster')
+    pcreate.set_defaults(command='create')
+    pcreate.add_argument('instances', type=int,
+                         help='Number of Node Manager instances to deploy')
 
-    ps = sp.add_parser('show',   help='Show compute cluster')
-    ps.set_defaults(command='show')
-
-    pd = sp.add_parser('delete', help='Destroy compute cluster')
-    pd.set_defaults(command='delete')
-
-    pm = sp.add_parser('manual')
-    pm.set_defaults(command='manual')
-    pm.add_argument('instances', type=int,
-                    help='Number of Node Manager instances to deploy')
-    pm.add_argument('-t', '--tag', default='', help=SUPPRESS)
-    pm.add_argument('-s', '--steps', type=str, nargs='*',
-                    default=[], help=SUPPRESS)
-    return p
+    pdelete = subp.add_parser('delete', help='Destroy compute cluster')
+    pdelete.set_defaults(command='delete')
+    return parse
 
 def usage(parser):
+    """Print help"""
+
     parser.print_help()
     sys.exit(1)
 
 if __name__ == '__main__':
-    _p = argparser()
-    _args = vars(_p.parse_args())
+    _P = argparser()
+    _ARGS = vars(_P.parse_args())
 
-    CONFIG['verbose']       = False
-    CONFIG['mserv_cfg']     = _url(_args.get('management_address', ''))
-    CONFIG['vlanid']        = DEFAULT_VLANID
-    CONFIG['vlan_subnet']   = DEFAULT_VLANSUBNET
-    CONFIG['tag']           = _args.get('tag', '')
-    CONFIG['debug']         = _args.get('debug', False)
-    CONFIG['verbose']       = _args.get('verbose', False)
-    CONFIG['yarn_image']    = _args.get('yarn_image', None)
-    command = _args.get('command', '')
+    CONFIG['debug'] = _ARGS.get('debug', False)
+    CONFIG['yarn_image'] = _ARGS.get('yarn_image', YARN_IMAGE)
+    CONFIG['docker_portal'] = _ARGS.get('docker_portal', None)
+    COMMAND = _ARGS.get('command', '')
 
 
-    steps = []
-    if command == 'create':
-        CONFIG['instances'] = _args.get('instances', 1)
-        if (CONFIG['instances'] < 1):
+    STEPS = []
+    if COMMAND == 'create':
+        CONFIG['instances'] = _ARGS.get('instances', 1)
+        if CONFIG['instances'] < 1:
             print('Error: Invalid number of Node Manager instances (%s).' %
                   CONFIG['instances'])
             sys.exit(1)
-        steps = list(MK_ACTIONS)
+        STEPS = list(MK_ACTIONS)
 
-    elif command == 'show':
-        steps = ['show']
+    elif COMMAND == 'delete':
+        STEPS = list(RM_ACTIONS)
 
-    elif command == 'delete':
-        steps = list(RM_ACTIONS)
-
-    elif command == 'manual':
-        CONFIG['verbose']   = True
-        CONFIG['instances'] = _args.get('instances', 1)
-        steps = _args.get('steps', [])
-
-    if CONFIG['verbose'] is True:
-        print(steps)
-    ACTIONS = dict(MANUAL_ACTIONS)
-    ACTIONS.update(MK_ACTIONS)
+    if CONFIG['debug'] is True:
+        print(STEPS)
+    ACTIONS = dict(MK_ACTIONS)
     ACTIONS.update(RM_ACTIONS)
 
-    context = { }
-    for step in steps:
+    for step in STEPS:
         if step is '':
             continue
-        if CONFIG['verbose'] is True:
+        if CONFIG['debug'] is True:
             print('----------------------------------------------------------')
             print('>>> %s: Starting %s' %
-                                (datetime.datetime.now().isoformat(), step))
+                  (datetime.datetime.now().isoformat(), step))
         if not ACTIONS.has_key(step):
             print('Invalid step: %s!' % step)
             sys.exit(1)
-        ACTIONS[step](context)
-        if CONFIG['verbose'] is True:
+        ACTIONS[step]()
+        if CONFIG['debug'] is True:
             print('>>> %s: Completed %s' %
-                                (datetime.datetime.now().isoformat(), step))
+                  (datetime.datetime.now().isoformat(), step))
 
-    if command == 'create':
-        errors = ''
-        for step in steps:
-            error = context.get(step + '-error', None)
-            if error is not None:
-                errors += '\n  ' + error
-        if errors is not '':
-            print('Errors encountered:' + errors)
-        else:
-            print('Success: compute cluster created.')
+    if COMMAND == 'create':
+        print('Success: compute cluster created.')
 
-    elif command == 'delete':
-        errors = ''
-        for step in steps:
-            error = context.get(step + '-error', None)
-            if error is not None:
-                errors += '\n  ' + error
-        if errors is not '':
-            print('Errors encountered:' + errors)
-            print('Done: all compute cluster containers removed.')
-        else:
-            print('Success: compute cluster deleted.')
-
-    elif command == 'manual':
-        errors = ''
-        for step in steps:
-            error = context.get(step + '-error', None)
-            if error is not None:
-                errors += '\n  ' + error
-        if errors is not '':
-            print('Errors encountered:' + errors)
-        else:
-            print('Success: %s' % str(steps))
+    elif COMMAND == 'delete':
+        print('Success: compute cluster deleted.')
 
