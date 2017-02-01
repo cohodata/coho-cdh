@@ -39,6 +39,8 @@ YARN_IMAGE = 'cohodata/yarn:2.9'
 DEFAULT_NMVOLTYPE = 'temporary'
 DEFAULT_NMVOLSIZE = 3000
 
+DOCKER_COMPOSE = '/usr/local/bin/docker-compose'
+
 CONFIG = {}
 
 #------------------------------------------------------------------------------
@@ -244,7 +246,7 @@ def compose_command(cmd, recipe):
         recipefile.write(recipe)
         recipefile.flush()
         yaml = recipefile.name
-        rawcmd = 'docker-compose -H %s -f %s %s' % (portal, yaml, cmd)
+        rawcmd = '%s -H %s -f %s %s' % (DOCKER_COMPOSE, portal, yaml, cmd)
         if debug:
             print('docker-compose recipe file: %s' % yaml)
             print('Command: %s' % rawcmd)
@@ -300,7 +302,7 @@ def argparser():
     parse = ArgumentParser(description='COHO CDH Hadoop compute cluster '
                            'management script.')
     parse.add_argument('-p', '--docker-portal', type=str,
-                       help='IP address of the docker portal')
+                       help='The docker portal, with port suffix')
     parse.add_argument('-i', '--yarn-image', type=str,
                        help='Yarn image, with the registry and tag')
     parse.add_argument('-d', '--debug', action='store_true', help=SUPPRESS)
