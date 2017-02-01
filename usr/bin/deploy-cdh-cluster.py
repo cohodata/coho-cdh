@@ -327,10 +327,9 @@ if __name__ == '__main__':
     _P = argparser()
     _ARGS = vars(_P.parse_args())
 
-    CONFIG['tag'] = _ARGS.get('tag', '')
     CONFIG['debug'] = _ARGS.get('debug', False)
-    CONFIG['yarn_image'] = _ARGS.get('yarn-image', YARN_IMAGE)
-    CONFIG['docker_portal'] = _ARGS.get('docker-portal', None)
+    CONFIG['yarn_image'] = _ARGS.get('yarn_image', YARN_IMAGE)
+    CONFIG['docker_portal'] = _ARGS.get('docker_portal', None)
     COMMAND = _ARGS.get('command', '')
 
 
