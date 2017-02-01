@@ -21,8 +21,23 @@
 """Script to deploy a CDH compute cluster on a Coho Data DataStream
 system.
 
-Usage:
-    $ docker run --rm -ti cohodata/yarn:2.9 /usr/bin/deploy-cdh-cluster.py --docker-portal=<portal_addr> --yarn-image=<registry_ip>:5000/cohodata/yarn:2.9 create <number_of_nodemanagers>
+
+To run this script, you will need:
+
+  - the location of the tenant's docker portal
+    ie. tcp://<portal_IP>:<port>
+
+  - the yarn image on the tenant's docker registry
+    ie. <registry_ip>:5000/cohodata/yarn:5.0
+
+
+First, the image must be pushed to the tenant's docker registry:
+    $ docker pull cohodata/yarn:5.0
+    $ docker tag cohodata/yarn:5.0 <registry_ip>:5000/cohodata/yarn:5.0
+    $ docker push <registry_ip>:5000/cohodata/yarn:5.0
+
+The deployment script can then be run from a container with the image:
+    $ docker run --rm -ti cohodata/yarn:5.0 /usr/bin/deploy-cdh-cluster.py --docker-portal=<portal_addr> --yarn-image=<registry_ip>:5000/cohodata/yarn:5.0 create <number_of_nodemanagers>
 """
 from __future__ import print_function
 
@@ -35,7 +50,7 @@ import subprocess
 RESOURCEMANAGER = 'resourcemanager'
 NODEMANAGER = 'nodemanager'
 HISTORYSERVER = 'historyserver'
-YARN_IMAGE = 'cohodata/yarn:2.9'
+YARN_IMAGE = 'cohodata/yarn:5.0'
 DEFAULT_NMVOLTYPE = 'temporary'
 DEFAULT_NMVOLSIZE = 3000
 
