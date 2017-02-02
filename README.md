@@ -21,5 +21,5 @@ from the docker hub and push it to the tenant registry:
   
 then run the deployment script from a container with the image:
 
-    docker run --rm -ti cohodata/yarn:5.0 /usr/bin/deploy-cdh-cluster.py --docker-portal=<portal_addr> --yarn-image=<registry_ip>:5000/cohodata/yarn:5.0 create <number_of_nodemanagers>
+    docker run --rm -ti cohodata/yarn:5.0 deploy-cdh-cluster --docker-portal=<portal_addr> --yarn-image=<registry_ip>:5000/cohodata/yarn:5.0 create <number_of_nodemanagers>
 

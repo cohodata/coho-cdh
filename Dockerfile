@@ -60,13 +60,13 @@ RUN apt-get update -y && apt-get install -y ant \
                        hadoop-0.20-mapreduce-tasktracker
 
 # Add Hadoop configurations
-ADD etc/hadoop/conf.docker.yarn /etc/hadoop/conf.docker.yarn
+COPY etc/hadoop/conf.docker.yarn /etc/hadoop/conf.docker.yarn
 ENV LOGGER_ENV_VAR "INFO,console"
 
 # Add Hadoop scripts
-ADD usr/local/bin/cio-hadoop-run                          /usr/local/bin/cio-hadoop-run
-ADD usr/lib/hadoop-yarn/sbin/yarn-daemon.sh               /usr/lib/hadoop-yarn/sbin/yarn-daemon.sh
-ADD usr/lib/hadoop-mapreduce/sbin/mr-jobhistory-daemon.sh /usr/lib/hadoop-mapreduce/sbin/mr-jobhistory-daemon.sh
+COPY usr/local/bin/cio-hadoop-run                          /usr/local/bin/cio-hadoop-run
+COPY usr/lib/hadoop-yarn/sbin/yarn-daemon.sh               /usr/lib/hadoop-yarn/sbin/yarn-daemon.sh
+COPY usr/lib/hadoop-mapreduce/sbin/mr-jobhistory-daemon.sh /usr/lib/hadoop-mapreduce/sbin/mr-jobhistory-daemon.sh
 
 # This image will be used to set up a Yarn cluster
 RUN rm -rf /etc/hadoop/conf && \
@@ -77,6 +77,6 @@ ADD https://github.com/docker/compose/releases/download/1.10.0/docker-compose-Li
 RUN chmod 0755 /usr/local/bin/docker-compose
 
 # Driver
-ADD usr/bin/deploy-cdh-cluster.py /usr/bin/deploy-cdh-cluster.py
+COPY usr/bin/deploy-cdh-cluster /usr/bin/deploy-cdh-cluster
 
 CMD ["/usr/local/bin/cio-hadoop-run"]

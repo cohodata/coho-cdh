@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/python
 
 #------------------------------------------------------------------------------
 # Copyright (c) 2017 Coho Data Inc.
@@ -37,7 +37,7 @@ First, the image must be pushed to the tenant's docker registry:
     $ docker push <registry_ip>:5000/cohodata/yarn:5.0
 
 The deployment script can then be run from a container with the image:
-    $ docker run --rm -ti cohodata/yarn:5.0 /usr/bin/deploy-cdh-cluster.py --docker-portal=<portal_addr> --yarn-image=<registry_ip>:5000/cohodata/yarn:5.0 create <number_of_nodemanagers>
+    $ docker run --rm -ti cohodata/yarn:5.0 deploy-cdh-cluster --docker-portal=<portal_addr> --yarn-image=<registry_ip>:5000/cohodata/yarn:5.0 create <number_of_nodemanagers>
 """
 from __future__ import print_function
 
