@@ -46,6 +46,7 @@ import datetime
 import tempfile
 from collections import OrderedDict
 import subprocess
+import docker
 
 RESOURCEMANAGER = 'resourcemanager'
 NODEMANAGER = 'nodemanager'
@@ -231,9 +232,21 @@ def compose_networks(networks):
 #------------------------------------------------------------------------------
 #------------------------------------------------------------------------------
 def mk_check():
-    """Verify that the user is not deploying more nodes than MAs in the
-       cluster.  Once we have docker-py, we can use docker info"""
-    pass
+    """Verify that the user is not deploying more nodes than MAs in the cluster
+    """
+    portal = get_cfg('docker_portal')
+    instances = get_cfg('instances')
+
+    try:
+        c = docker.Client(version='auto', base_url='tcp://%s' % (portal), timeout=10)
+        nodes = next((v for k, v in c.info()['SystemStatus'] if k == 'Nodes'), 0)
+    except Exception as e:
+        print('Error pulling info from docker portal: %s' % (e))
+        sys.exit(1)
+
+    if instances > nodes:
+        print('Error: Number of Node Manager instances (%s) cannot be greater than the number of cluster nodes (%s)' % (instances, nodes))
+        sys.exit(1)
 
 def compose_recipe(nodes):
     """Returns a docker compose recipe for the CDH cluster"""

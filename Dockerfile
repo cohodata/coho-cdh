@@ -51,6 +51,7 @@ RUN apt-get update -y && apt-get install -y ant \
                        iputils-ping \
                        net-tools \
                        python \
+                       python-pip \
                        oracle-j2sdk1.7 \
                        hadoop-yarn-resourcemanager \
                        hadoop-yarn-nodemanager \
@@ -58,6 +59,8 @@ RUN apt-get update -y && apt-get install -y ant \
                        hadoop-mapreduce-historyserver \
                        hadoop-0.20-mapreduce-jobtracker \
                        hadoop-0.20-mapreduce-tasktracker
+
+RUN pip install docker-py==1.10.6
 
 # Add Hadoop configurations
 COPY etc/hadoop/conf.docker.yarn /etc/hadoop/conf.docker.yarn
