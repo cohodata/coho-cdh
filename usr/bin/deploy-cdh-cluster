@@ -238,7 +238,7 @@ def mk_check():
     instances = get_cfg('instances')
 
     try:
-        c = docker.Client(version='auto', base_url='tcp://%s' % (portal), timeout=10)
+        c = docker.Client(version='auto', base_url=portal, timeout=10)
         nodes = next((v for k, v in c.info()['SystemStatus'] if k == 'Nodes'), 0)
     except Exception as e:
         print('Error pulling info from docker portal: %s' % (e))
