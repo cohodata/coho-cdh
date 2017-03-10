@@ -343,8 +343,9 @@ def rm_volumes():
                     print('Removing %s' % vol)
                 _rm_volume(vol)
     except Exception as exc:
+        # Just log an error.  We want to try removing all volumes even if a
+        # previous volume could not be removed.
         print('Error deleting volumes: %s' % (exc))
-        sys.exit(1)
 
 #------------------------------------------------------------------------------
 MK_ACTIONS = OrderedDict([('mk-check', mk_check),
