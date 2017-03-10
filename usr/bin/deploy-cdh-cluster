@@ -46,8 +46,8 @@ import datetime
 import tempfile
 from collections import OrderedDict
 import subprocess
-import docker
 import re
+import docker
 
 RESOURCEMANAGER = 'resourcemanager'
 NODEMANAGER = 'nodemanager'
@@ -317,13 +317,14 @@ def compose_down():
     return compose_command('down --remove-orphans', recipe)
 
 def rm_volumes():
+    """Remove ephemeral volumes used by compute nodes"""
     def _rm_volume(volume):
         try:
-            c.remove_volume(volume)
-        except docker.errors.APIError as e:
-            if re.search('[Nn]o such volume', str(e)):
+            cli.remove_volume(volume)
+        except docker.errors.APIError as exc:
+            if re.search('[Nn]o such volume', str(exc)):
                 if debug:
-                    print('Swallowing %s' % e)
+                    print('Swallowing %s' % exc)
             else:
                 raise
 
@@ -331,21 +332,20 @@ def rm_volumes():
     debug = get_cfg('debug')
 
     try:
-        c = docker.Client(version='auto',
-                          base_url='tcp://%s' % (portal), timeout=10)
-        volume_names = [v['Name'] for v in c.volumes()['Volumes']]
-        for v in volume_names:
+        cli = docker.Client(version='auto',
+                            base_url='tcp://%s' % (portal), timeout=10)
+        volume_names = [vol['Name'] for vol in cli.volumes()['Volumes']]
+        for vol in volume_names:
             if debug:
-                print('Checking %s' % v)
-            if re.search('nodemanager[0-9]{8}-vol$', v):
+                print('Checking %s' % vol)
+            if re.search('nodemanager[0-9]{8}-vol$', vol):
                 if debug:
-                    print('Removing %s' % v)
-                _rm_volume(v)
-    except Exception as e:
-        print('Error deleting volumes: %s' % (e))
+                    print('Removing %s' % vol)
+                _rm_volume(vol)
+    except Exception as exc:
+        print('Error deleting volumes: %s' % (exc))
         sys.exit(1)
 
-#------------------------------------------------------------------------------
 #------------------------------------------------------------------------------
 MK_ACTIONS = OrderedDict([('mk-check', mk_check),
                           ('up', compose_up),
