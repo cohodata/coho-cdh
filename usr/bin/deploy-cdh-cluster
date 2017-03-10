@@ -47,6 +47,7 @@ import tempfile
 from collections import OrderedDict
 import subprocess
 import docker
+import re
 
 RESOURCEMANAGER = 'resourcemanager'
 NODEMANAGER = 'nodemanager'
@@ -315,12 +316,43 @@ def compose_down():
     recipe = compose_recipe(nodes)
     return compose_command('down --remove-orphans', recipe)
 
+def rm_volumes():
+    def _rm_volume(volume):
+        try:
+            c.remove_volume(volume)
+        except docker.errors.APIError as e:
+            if re.search('[Nn]o such volume', str(e)):
+                if debug:
+                    print('Swallowing %s' % e)
+            else:
+                raise
+
+    portal = get_cfg('docker_portal')
+    debug = get_cfg('debug')
+
+    try:
+        c = docker.Client(version='auto',
+                          base_url='tcp://%s' % (portal), timeout=10)
+        volume_names = [v['Name'] for v in c.volumes()['Volumes']]
+        for v in volume_names:
+            if debug:
+                print('Checking %s' % v)
+            if re.search('nodemanager[0-9]{8}-vol$', v):
+                if debug:
+                    print('Removing %s' % v)
+                _rm_volume(v)
+    except Exception as e:
+        print('Error deleting volumes: %s' % (e))
+        sys.exit(1)
+
+#------------------------------------------------------------------------------
 #------------------------------------------------------------------------------
 MK_ACTIONS = OrderedDict([('mk-check', mk_check),
                           ('up', compose_up),
                          ])
 
 RM_ACTIONS = OrderedDict([('down', compose_down),
+                          ('rm-vol', rm_volumes),
                          ])
 
 def argparser():
