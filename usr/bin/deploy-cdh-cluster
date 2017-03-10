@@ -46,6 +46,7 @@ import datetime
 import tempfile
 from collections import OrderedDict
 import subprocess
+import re
 import docker
 
 RESOURCEMANAGER = 'resourcemanager'
@@ -315,12 +316,53 @@ def compose_down():
     recipe = compose_recipe(nodes)
     return compose_command('down --remove-orphans', recipe)
 
+def rm_volumes():
+    """Remove ephemeral volumes used by compute nodes"""
+    def _rm_volume(volume):
+        try:
+            cli.remove_volume(volume)
+        except docker.errors.NotFound as e:
+            if debug:
+                print('Swallowing %s' % e)
+        except docker.errors.APIError as e:
+            # CIO-29936: standalone swarm does not understand the concept
+            #            of 'global' volumes.  Instead, the swarm manager
+            #            attempts to remove the volume from every docker
+            #            host; this fails with an HTTP 500 on the second
+            #            host because COHO volumes have global scope.
+            #            Work around this by ignoring 'no such volume'
+            #            errors.
+            if re.search('[Nn]o such volume', e.explanation):
+                if debug:
+                    print('Swallowing %s' % e)
+            else:
+                raise
+
+    portal = get_cfg('docker_portal')
+    debug = get_cfg('debug')
+
+    try:
+        cli = docker.Client(version='auto', base_url=portal, timeout=10)
+        volume_names = [vol['Name'] for vol in cli.volumes()['Volumes']]
+        for vol in volume_names:
+            if debug:
+                print('Checking %s' % vol)
+            if re.search('nodemanager[0-9]{8}-vol$', vol):
+                if debug:
+                    print('Removing %s' % vol)
+                _rm_volume(vol)
+    except Exception as exc:
+        # Just log an error.  We want to try removing all volumes even if a
+        # previous volume could not be removed.
+        print('Error deleting volumes: %s' % (exc))
+
 #------------------------------------------------------------------------------
 MK_ACTIONS = OrderedDict([('mk-check', mk_check),
                           ('up', compose_up),
                          ])
 
 RM_ACTIONS = OrderedDict([('down', compose_down),
+                          ('rm-vol', rm_volumes),
                          ])
 
 def argparser():
