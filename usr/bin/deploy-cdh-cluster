@@ -239,7 +239,7 @@ def mk_check():
     instances = get_cfg('instances')
 
     try:
-        c = docker.Client(version='auto', base_url='tcp://%s' % (portal), timeout=10)
+        c = docker.Client(version='auto', base_url=portal, timeout=10)
         nodes = next((v for k, v in c.info()['SystemStatus'] if k == 'Nodes'), 0)
     except Exception as e:
         print('Error pulling info from docker portal: %s' % (e))
@@ -321,10 +321,20 @@ def rm_volumes():
     def _rm_volume(volume):
         try:
             cli.remove_volume(volume)
-        except docker.errors.APIError as exc:
-            if re.search('[Nn]o such volume', str(exc)):
+        except docker.errors.NotFound as e:
+            if debug:
+                print('Swallowing %s' % e)
+        except docker.errors.APIError as e:
+            # CIO-29936: standalone swarm does not understand the concept
+            #            of 'global' volumes.  Instead, the swarm manager
+            #            attempts to remove the volume from every docker
+            #            host; this fails with an HTTP 500 on the second
+            #            host because COHO volumes have global scope.
+            #            Work around this by ignoring 'no such volume'
+            #            errors.
+            if re.search('[Nn]o such volume', e.explanation):
                 if debug:
-                    print('Swallowing %s' % exc)
+                    print('Swallowing %s' % e)
             else:
                 raise
 
@@ -332,8 +342,7 @@ def rm_volumes():
     debug = get_cfg('debug')
 
     try:
-        cli = docker.Client(version='auto',
-                            base_url='tcp://%s' % (portal), timeout=10)
+        cli = docker.Client(version='auto', base_url=portal, timeout=10)
         volume_names = [vol['Name'] for vol in cli.volumes()['Volumes']]
         for vol in volume_names:
             if debug:
