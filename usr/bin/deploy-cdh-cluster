@@ -343,14 +343,15 @@ def rm_volumes():
 
     try:
         cli = docker.Client(version='auto', base_url=portal, timeout=10)
-        volume_names = [vol['Name'] for vol in cli.volumes()['Volumes']]
-        for vol in volume_names:
+        volumes = cli.volumes()['Volumes']
+        for vol in volumes:
+            name = vol.get('Name')
             if debug:
-                print('Checking %s' % vol)
-            if re.search('nodemanager[0-9]{8}-vol$', vol):
+                print('Checking %s' % name)
+            if re.search('nodemanager[0-9]{8}-vol$', name):
                 if debug:
-                    print('Removing %s' % vol)
-                _rm_volume(vol)
+                    print('Removing %s' % name)
+                _rm_volume(name)
     except Exception as exc:
         # Just log an error.  We want to try removing all volumes even if a
         # previous volume could not be removed.
