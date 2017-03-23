@@ -28,16 +28,16 @@ To run this script, you will need:
     ie. tcp://<portal_IP>:<port>
 
   - the yarn image on the tenant's docker registry
-    ie. <registry_ip>:5000/cohodata/yarn:5.0
+    ie. <registry_ip>:5000/cohodata/yarn:<tag>
 
 
 First, the image must be pushed to the tenant's docker registry:
-    $ docker pull cohodata/yarn:5.0
-    $ docker tag cohodata/yarn:5.0 <registry_ip>:5000/cohodata/yarn:5.0
-    $ docker push <registry_ip>:5000/cohodata/yarn:5.0
+    $ docker pull cohodata/yarn:<tag>
+    $ docker tag cohodata/yarn:<tag> <registry_ip>:5000/cohodata/yarn:<tag>
+    $ docker push <registry_ip>:5000/cohodata/yarn:<tag>
 
 The deployment script can then be run from a container with the image:
-    $ docker run --rm -ti cohodata/yarn:5.0 deploy-cdh-cluster --docker-portal=<portal_addr> --yarn-image=<registry_ip>:5000/cohodata/yarn:5.0 create <number_of_nodemanagers>
+    $ docker run --rm -ti cohodata/yarn:<tag> deploy-cdh-cluster --docker-portal=<portal_addr> --yarn-image=<registry_ip>:5000/cohodata/yarn:<tag> create <number_of_nodemanagers>
 """
 from __future__ import print_function
 
@@ -52,7 +52,6 @@ import docker
 RESOURCEMANAGER = 'resourcemanager'
 NODEMANAGER = 'nodemanager'
 HISTORYSERVER = 'historyserver'
-YARN_IMAGE = 'cohodata/yarn:5.0'
 DEFAULT_NMVOLTYPE = 'temporary'
 DEFAULT_NMVOLSIZE = 3000
 
@@ -73,7 +72,8 @@ def get_cfg(key):
 
     # Fill in the value as necessary
     if key == 'yarn_image':
-        CONFIG[key] = YARN_IMAGE
+        print('A cohodata/yarn image tag must be specified.')
+        sys.exit(1)
 
     elif key == 'docker_portal':
         print('A docker portal address must be specified.')
@@ -401,7 +401,7 @@ if __name__ == '__main__':
     _ARGS = vars(_P.parse_args())
 
     CONFIG['debug'] = _ARGS.get('debug', False)
-    CONFIG['yarn_image'] = _ARGS.get('yarn_image', YARN_IMAGE)
+    CONFIG['yarn_image'] = _ARGS.get('yarn_image', None)
     CONFIG['docker_portal'] = _ARGS.get('docker_portal', None)
     COMMAND = _ARGS.get('command', '')
 
