@@ -111,7 +111,7 @@ def compose_list(label, values, indent_level):
 
 #------------------------------------------------------------------------------
 #pylint: disable=too-many-arguments
-def compose_service(name, cmd, role=None, volumes=None, depends=None,
+def compose_service(name, cmd, syslog_url, role=None, volumes=None, depends=None,
                     options=None):
     """Returns a docker compose recipe stanza describing a service"""
 
@@ -136,7 +136,11 @@ def compose_service(name, cmd, role=None, volumes=None, depends=None,
         container_name: %s
         image: %s
         command: %s
-%s%s%s%s""" % (name, name, image, cmd, env, vol, dep, extra)
+        logging:
+          driver: syslog
+          options:
+            syslog-address: %s
+%s%s%s%s""" % (name, name, image, cmd, syslog_url, env, vol, dep, extra)
     stanza += '\n'
     return stanza
 #pylint: enable=too-many-arguments
@@ -145,15 +149,16 @@ def compose_service(name, cmd, role=None, volumes=None, depends=None,
 INSTALL_INFO = '/opt/cio/etc/install_info:/install_info:ro'
 HADOOP_RUN = '/usr/local/bin/cio-hadoop-run'
 
-def compose_hadoop_service(name):
+def compose_hadoop_service(name, syslog_url):
     """Returns a docker compose recipe stanza describing a hadoop service"""
 
     return compose_service(name,
                            [HADOOP_RUN, '--name=%s' % name],
+                           syslog_url,
                            role=('%s' % name),
                            volumes=[INSTALL_INFO])
 
-def compose_hadoop_nm(nodes=()):
+def compose_hadoop_nm(syslog_url, nodes=()):
     """Returns a docker compose recipe stanza describing a nodemanager"""
 
     stanza = ''
@@ -162,29 +167,31 @@ def compose_hadoop_nm(nodes=()):
         tmpvol = compose_nmvolname(node)
         stanza += compose_service(name,
                                   '\'%s\'' % HADOOP_RUN,
+                                  syslog_url,
                                   role='nodemanager',
                                   volumes=[INSTALL_INFO, '%s:/mnt' % tmpvol],
                                   depends=['resourcemanager', 'historyserver'])
     return stanza
 
-def compose_hadoop_client():
+def compose_hadoop_client(syslog_url):
     """Returns a docker compose recipe stanza describing a hadoop client"""
 
     return compose_service('client',
                            '\'/bin/bash\'',
+                           syslog_url,
                            depends=['resourcemanager'],
                            options=['user: hdfs', 'stdin_open: true',
                                     'tty: true'])
 
 #------------------------------------------------------------------------------
-def compose_services(nodes=()):
+def compose_services(syslog_url, nodes=()):
     """Returns a docker compose recipe stanza describing services"""
 
     stanza = 'services:\n'
-    stanza += compose_hadoop_service('resourcemanager')
-    stanza += compose_hadoop_service('historyserver')
-    stanza += compose_hadoop_nm(nodes)
-    stanza += compose_hadoop_client()
+    stanza += compose_hadoop_service('resourcemanager', syslog_url)
+    stanza += compose_hadoop_service('historyserver', syslog_url)
+    stanza += compose_hadoop_nm(syslog_url, nodes)
+    stanza += compose_hadoop_client(syslog_url)
     return stanza
 
 #------------------------------------------------------------------------------
@@ -212,8 +219,8 @@ def compose_volumes(nodes=()):
     return stanza
 
 #------------------------------------------------------------------------------
-def compose_network(network):
-    """Returns a docker compose recipe stanza describing a network"""
+def compose_external_network(network):
+    """Returns a docker compose recipe stanza describing an external network"""
 
     stanza = r"""    default:
         external:
@@ -221,12 +228,12 @@ def compose_network(network):
     return stanza
 
 #------------------------------------------------------------------------------
-def compose_networks(networks):
+def compose_external_networks(networks):
     """Returns a docker compose recipe stanza describing networks"""
 
     stanza = 'networks:\n'
     for network in networks:
-        stanza += compose_network(network)
+        stanza += compose_external_network(network)
         stanza += '\n'
     return stanza
 
@@ -249,18 +256,15 @@ def mk_check():
         print('Error: Number of Node Manager instances (%s) cannot be greater than the number of cluster nodes (%s)' % (instances, nodes))
         sys.exit(1)
 
-def compose_recipe(nodes):
+def compose_recipe(nodes, network='network0', syslog_url='udp://127.0.0.1:514'):
     """Returns a docker compose recipe for the CDH cluster"""
-
-    if nodes is None or not nodes:
-        nodes = [0]
-    networks = ['network0']
+    networks = [network]
     stanzas = 'version: \'2\'\n\n'
-    stanzas += compose_services(nodes)
+    stanzas += compose_services(syslog_url, nodes)
     stanzas += '\n'
     stanzas += compose_volumes(nodes)
     stanzas += '\n'
-    stanzas += compose_networks(networks)
+    stanzas += compose_external_networks(networks)
     stanzas += '\n'
     if get_cfg('debug'):
         print(stanzas)
@@ -291,9 +295,34 @@ def compose_command(cmd, recipe):
 
 def compose_up():
     """Executes docker-compose up -d"""
-
+    portal = get_cfg('docker_portal')
     nodes = xrange(get_cfg('instances'))
-    recipe = compose_recipe(nodes)
+
+    try:
+        c = docker.Client(version='auto', base_url=portal, timeout=10)
+    except Exception as e:
+        print('Error connecting to the docker portal: %s' % (e))
+        sys.exit(1)
+
+    try:
+        network = next((n['Name'] for n in c.networks() if n['Driver'] == 'cohovlan'), None)
+    except Exception as e:
+        print('Could not determine name of the microservices VLAN network: %s' % e)
+        sys.exit(1)
+    if not network:
+        print('Could not determine name of the microservices VLAN network')
+        sys.exit(1)
+
+    try:
+        syslog_addr = c.inspect_container('logging')['NetworkSettings']['Networks'][network]['IPAddress']
+    except Exception as e:
+        print('Could not determine address of the logging service: %s' % e)
+        sys.exit(1)
+    if not syslog_addr:
+        print('Could not determine address of Syslog container')
+        sys.exit(1)
+
+    recipe = compose_recipe(nodes, network=network, syslog_url="udp://%s:514" % (syslog_addr))
     return compose_command('up -d', recipe)
 
 def compose_down():
