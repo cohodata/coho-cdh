@@ -53,7 +53,7 @@ RESOURCEMANAGER = 'resourcemanager'
 NODEMANAGER = 'nodemanager'
 HISTORYSERVER = 'historyserver'
 DEFAULT_NMVOLTYPE = 'temporary'
-DEFAULT_NMVOLSIZE = 3000
+DEFAULT_NMVOLSIZE = 1000000 # 1TB
 
 DOCKER_COMPOSE = '/usr/local/bin/docker-compose'
 
