@@ -56,6 +56,8 @@ DEFAULT_NMVOLTYPE = 'temporary'
 DEFAULT_NMVOLSIZE = 1000000 # 1TB
 
 DOCKER_COMPOSE = '/usr/local/bin/docker-compose'
+COMPOSE_HTTP_TIMEOUT = 10 * 60 # Formatting the NodeManager volumes has been observed to take 5 minutes,
+                               # be conservative and double that.
 
 CONFIG = {}
 
@@ -285,7 +287,7 @@ def compose_command(cmd, recipe):
             print('Command: %s' % rawcmd)
         splitcmd = rawcmd.split()
         try:
-            ret = subprocess.check_output(splitcmd)
+            ret = subprocess.check_output(splitcmd, env={'COMPOSE_HTTP_TIMEOUT': str(COMPOSE_HTTP_TIMEOUT)})
             print(ret)
         except subprocess.CalledProcessError as exc:
             error = 'Running docker-compose %s error: %s' % (cmd, str(exc))
