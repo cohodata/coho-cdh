@@ -56,8 +56,8 @@ DEFAULT_NMVOLTYPE = 'temporary'
 DEFAULT_NMVOLSIZE = 1000000 # 1TB
 
 DOCKER_COMPOSE = '/usr/local/bin/docker-compose'
-COMPOSE_HTTP_TIMEOUT = 10 * 60 # Formatting the NodeManager volumes has been observed to take 5 minutes,
-                               # be conservative and double that.
+COMPOSE_HTTP_TIMEOUT = 15 * 60 # Formatting the NodeManager volumes has been observed to take 5 minutes,
+                               # be conservative and triple that.
 
 CONFIG = {}
 
